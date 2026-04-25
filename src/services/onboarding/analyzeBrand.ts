@@ -84,8 +84,12 @@ export async function analyzeBrand(input: {
     };
   }
 
-  const imageUrls = scrape.posts.slice(0, 9).map((p) => p.imageUrl);
+  const imageUrls = scrape.posts.map((p) => p.imageUrl);
   const captions = scrape.posts.map((p) => p.caption);
+  log.info(
+    { postCount: scrape.posts.length, imageCount: imageUrls.length },
+    'Sending full IG grid to analyzers',
+  );
 
   let visuals;
   let voice;
