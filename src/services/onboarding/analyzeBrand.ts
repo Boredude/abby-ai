@@ -13,9 +13,43 @@ export type AnalyzeBrandResult =
   | {
       ok: false;
       handle: string;
-      reason: 'not_found' | 'private' | 'empty' | 'rate_limited' | 'unknown';
+      reason:
+        | 'not_found'
+        | 'private'
+        | 'empty'
+        | 'rate_limited'
+        | 'service_unavailable' // our analyzer / 3rd-party API problem (billing, auth, 5xx)
+        | 'unknown';
       message: string;
     };
+
+/**
+ * Try to recognize errors that are about *our* infra (Anthropic billing,
+ * auth, 5xx) versus errors that are about the user's IG account. We don't
+ * want to tell the user "your handle is wrong, try another" when their
+ * handle was fine and we just ran out of credits.
+ */
+function classifyAnalyzerError(err: unknown): 'service_unavailable' | 'unknown' {
+  const e = err as { name?: string; message?: string; statusCode?: number };
+  const msg = (e?.message ?? '').toLowerCase();
+  if (
+    msg.includes('credit balance') ||
+    msg.includes('insufficient_quota') ||
+    msg.includes('quota') ||
+    msg.includes('rate limit') ||
+    msg.includes('overloaded') ||
+    msg.includes('unauthorized') ||
+    msg.includes('authentication') ||
+    msg.includes('api key')
+  ) {
+    return 'service_unavailable';
+  }
+  const status = e?.statusCode;
+  if (typeof status === 'number' && (status === 401 || status === 403 || status === 429 || status >= 500)) {
+    return 'service_unavailable';
+  }
+  return 'unknown';
+}
 
 /**
  * Run the full IG → brand kit analysis pipeline directly (no agent in the
@@ -70,11 +104,12 @@ export async function analyzeBrand(input: {
       }),
     ]);
   } catch (err) {
-    log.error({ err }, 'Brand analysis (visuals/voice) failed');
+    const reason = classifyAnalyzerError(err);
+    log.error({ err, reason }, 'Brand analysis (visuals/voice) failed');
     return {
       ok: false,
       handle: input.handle,
-      reason: 'unknown',
+      reason,
       message: (err as Error).message,
     };
   }

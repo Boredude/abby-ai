@@ -86,7 +86,7 @@ const askIgHandle = createStep({
 async function presentBrandKitOrAskRetry(
   brandId: string,
   handle: string,
-): Promise<'reviewing' | 'retry_handle'> {
+): Promise<'reviewing' | 'retry_handle' | 'service_unavailable'> {
   const phone = await getBrandPhone(brandId);
   await sendText(
     phone,
@@ -97,8 +97,15 @@ async function presentBrandKitOrAskRetry(
   if (!result.ok) {
     logger.warn(
       { brandId, handle, reason: result.reason },
-      'Onboarding analysis failed; asking user for another handle',
+      'Onboarding analysis failed',
     );
+    if (result.reason === 'service_unavailable') {
+      await sendText(
+        phone,
+        `Argh — I hit a temporary hiccup on my side analyzing @${handle}. Reply 'retry' in a couple of minutes and I'll try again, or send a different handle if you'd like.`,
+      );
+      return 'service_unavailable';
+    }
     const msg =
       result.reason === 'private'
         ? `@${handle} looks private — I can only analyze public accounts. Send a different handle (without the @) and I'll try again.`
@@ -120,7 +127,7 @@ async function presentBrandKitOrAskRetry(
 
 const reviewSuspendSchema = z.object({
   question: z.string(),
-  mode: z.enum(['reviewing', 'retry_handle']),
+  mode: z.enum(['reviewing', 'retry_handle', 'service_unavailable']),
 });
 
 const runAnalysisAndConfirm = createStep({
@@ -141,8 +148,15 @@ const runAnalysisAndConfirm = createStep({
     const brand = await findBrandById(inputData.brandId);
     if (!brand) throw new Error(`Brand ${inputData.brandId} not found`);
 
-    // Branch 1: analysis previously failed → reply is a new handle to try.
+    // Branch 1: analysis previously failed → reply is either "retry" (same
+    // handle), a new handle, or a clarification we re-prompt on.
     if (!brand.brandKitJson) {
+      const lower = reply.toLowerCase();
+      if (/^(retry|try again|again|same|same handle)\b/.test(lower) && brand.igHandle) {
+        const mode = await presentBrandKitOrAskRetry(inputData.brandId, brand.igHandle);
+        await suspend({ question: 'brand_kit_review', mode });
+        return undefined as never;
+      }
       let newHandle: string;
       try {
         newHandle = normalizeIgHandle(reply);
