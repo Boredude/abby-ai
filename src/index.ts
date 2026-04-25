@@ -5,10 +5,20 @@ import { stopBoss } from './jobs/queue.js';
 import { startWorkers } from './jobs/workers.js';
 import { getMastra } from './mastra/index.js';
 import { getPool } from './db/client.js';
+import { runMigrations } from './db/runMigrations.js';
 import { app } from './server/app.js';
 
 async function main(): Promise<void> {
   const env = loadEnv();
+
+  // Apply any pending Drizzle migrations before anything else touches the DB,
+  // so a deploy that adds a new column is self-applying. Without this the app
+  // would crash on the first query referencing a column that only exists in
+  // schema.ts but not yet in the database (we hit exactly that on the
+  // brand-board deploy: every `upsertBrandByPhone` failed with
+  // `column "brand_board_image_url" does not exist`).
+  await runMigrations(env.DATABASE_URL);
+  logger.info('Database migrations applied');
 
   await getMastra();
   logger.info('Mastra instance ready');

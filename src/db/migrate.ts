@@ -1,26 +1,15 @@
 import 'dotenv/config';
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
-import pg from 'pg';
+import { runMigrations } from './runMigrations.js';
 
 /**
- * Standalone migration runner. Uses only DATABASE_URL — does NOT pull in the
- * full env schema or app logger so migrations can run in CI/CD environments
- * that don't have Kapso/OpenAI/R2 credentials.
+ * Standalone migration runner used by `pnpm run db:migrate`. Production also
+ * runs the same logic at app startup via `runMigrations` (see `src/index.ts`);
+ * this script stays useful for local dev, CI, and one-off backfills.
  */
 async function main(): Promise<void> {
-  const url = process.env.DATABASE_URL;
-  if (!url) {
-    throw new Error('DATABASE_URL is required to run migrations');
-  }
-  const pool = new pg.Pool({ connectionString: url, max: 2 });
-  const db = drizzle(pool);
-
   console.log('Running database migrations...');
-  await migrate(db, { migrationsFolder: './drizzle' });
+  await runMigrations();
   console.log('Migrations complete');
-
-  await pool.end();
 }
 
 main().catch((err) => {
