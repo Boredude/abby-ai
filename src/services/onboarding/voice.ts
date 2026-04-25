@@ -97,8 +97,8 @@ const INTENT_BRIEFS: Record<VoiceIntent, IntentBrief> = {
     mustConvey: "What they sent doesn't look like an Instagram handle. You need a username (like @nike or just nike) or an instagram.com link. Ask them to send it again.",
   },
   off_script_during_handle_ask: {
-    goal: 'The user asked a question or said something off-topic instead of sending an IG handle. React naturally to what they actually said using the userMessage in context — answer briefly if it\'s a question, acknowledge if it\'s small talk — then steer back to needing their IG handle to start.',
-    mustConvey: "Acknowledge or briefly answer their message in 1 short sentence based on the userMessage in context. Then steer back: you still need their IG handle to start.",
+    goal: 'The user replied without a usable Instagram handle. React naturally to what they actually said (answer briefly if it\'s a question, acknowledge if it\'s small talk), then ask them to send the IG handle.',
+    mustConvey: "Acknowledge or briefly answer their message in 1 short sentence based on the userMessage in context. Then ask them to send the IG handle (e.g. @theirname). NEVER claim you received their handle, found their account, are setting anything up, or are about to take action — you have NOT received a usable handle yet. Don't say things like \"let me get that set up\" or \"i see it now\".",
     maxChars: 320,
   },
   analysis_starting: {

@@ -7,6 +7,7 @@ import { getDuffyAgent } from '../agents/duffy.js';
 import { analyzeBrand } from '../../services/onboarding/analyzeBrand.js';
 import {
   InstagramScraperError,
+  extractHandleFromMessage,
   normalizeIgHandle,
 } from '../../services/apify/instagramScraper.js';
 import {
@@ -115,38 +116,39 @@ const askIgHandle = createStep({
       await suspend({ question: 'ig_handle' });
       return undefined as never;
     }
-    let igHandle: string;
-    try {
-      igHandle = normalizeIgHandle(resumeData.reply);
-    } catch (err) {
-      if (!(err instanceof InstagramScraperError)) throw err;
-      const phone = await getBrandPhone(inputData.brandId);
-      // If the user replied with something that doesn't even resemble a handle
-      // (e.g. "what can you do?" or "wdym?"), treat it as an off-script
-      // question and let Duffy actually react before re-asking. This avoids the
-      // "two identical canned replies" UX bug where any non-handle reply hit
-      // the same hardcoded "that doesn't look like a valid handle" message.
-      const intent = looksLikeHandle(resumeData.reply)
-        ? 'ig_handle_invalid_format'
-        : 'off_script_during_handle_ask';
-      const fallback =
-        intent === 'off_script_during_handle_ask'
-          ? "Good question — but first I need your Instagram handle to get started. Send your username (like @nike) or the full instagram.com link?"
-          : "That doesn't look like a valid Instagram handle. Send your username (like @nike, nike, or the full instagram.com link) and I'll try again.";
-      await sendText(
-        phone,
-        await sayInDuffyVoice({
-          intent,
-          brandId: inputData.brandId,
-          context: { userMessage: resumeData.reply },
-          fallback,
-        }),
-      );
-      await suspend({ question: 'ig_handle' });
-      return undefined as never;
+    // Tolerant extraction first — accepts "@ob.cocktails", "Oh got it.
+    // @ob.cocktails", "my handle is instagram.com/ob.cocktails" etc. Only if
+    // we can't find a handle anywhere in the reply do we treat it as
+    // off-script.
+    const extracted = extractHandleFromMessage(resumeData.reply);
+    if (extracted) {
+      await updateBrand(inputData.brandId, { igHandle: extracted });
+      return { brandId: inputData.brandId, igHandle: extracted };
     }
-    await updateBrand(inputData.brandId, { igHandle });
-    return { brandId: inputData.brandId, igHandle };
+
+    const phone = await getBrandPhone(inputData.brandId);
+    // No handle found in the reply. If it at least *looks* like a single
+    // malformed token (e.g. an email, weird punctuation), tell them what shape
+    // we need. Otherwise treat it as an off-script question and let Duffy
+    // actually react before re-asking.
+    const intent = looksLikeHandle(resumeData.reply)
+      ? 'ig_handle_invalid_format'
+      : 'off_script_during_handle_ask';
+    const fallback =
+      intent === 'off_script_during_handle_ask'
+        ? "Good question — but first I need your Instagram handle to get started. Send your username (like @nike) or the full instagram.com link?"
+        : "That doesn't look like a valid Instagram handle. Send your username (like @nike, nike, or the full instagram.com link) and I'll try again.";
+    await sendText(
+      phone,
+      await sayInDuffyVoice({
+        intent,
+        brandId: inputData.brandId,
+        context: { userMessage: resumeData.reply },
+        fallback,
+      }),
+    );
+    await suspend({ question: 'ig_handle' });
+    return undefined as never;
   },
 });
 
@@ -249,11 +251,8 @@ const runAnalysisAndConfirm = createStep({
         await suspend({ question: 'brand_kit_review', mode });
         return undefined as never;
       }
-      let newHandle: string;
-      try {
-        newHandle = normalizeIgHandle(reply);
-      } catch (err) {
-        if (!(err instanceof InstagramScraperError)) throw err;
+      const newHandle = extractHandleFromMessage(reply);
+      if (!newHandle) {
         await sendText(
           phone,
           await sayInDuffyVoice({

@@ -128,6 +128,60 @@ export function normalizeIgHandle(input: string): string {
   return trimmed;
 }
 
+/**
+ * Tolerant handle extraction for free-form replies.
+ *
+ * Real users don't always send the handle as a clean isolated message — they
+ * write things like `"Oh got it. @ob.cocktails"` or
+ * `"my handle is instagram.com/ob.cocktails"`. The strict `normalizeIgHandle`
+ * rejects those because the whole reply isn't a handle. This helper:
+ *
+ *   1. Tries the whole reply first (covers `nike`, `@nike`, `instagram.com/nike`).
+ *   2. Otherwise scans the reply for a strong signal — an explicit `@handle`
+ *      token or an `instagram.com/...` URL — and normalizes the first match.
+ *
+ * We deliberately do NOT extract bare word tokens (e.g. picking `nike` out of
+ * "I love nike") because that's ambiguous and would hijack regular chat. An
+ * explicit `@` or URL is required for embedded extraction.
+ *
+ * Returns the normalized username, or `null` if nothing usable was found.
+ */
+export function extractHandleFromMessage(input: string): string | null {
+  if (typeof input !== 'string') return null;
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  try {
+    return normalizeIgHandle(trimmed);
+  } catch {
+    // Fall through to embedded extraction.
+  }
+
+  // Strongest signal: an explicit @handle token. IG usernames are 1–30 chars
+  // of [a-zA-Z0-9._]. We require the @ to be at a word boundary so we don't
+  // pick up email addresses (e.g. `@gmail` in `me@gmail.com`).
+  const atMatch = trimmed.match(/(?:^|[\s(,;:!?'"`])@([a-zA-Z0-9._]{1,30})/);
+  if (atMatch && atMatch[1]) {
+    try {
+      return normalizeIgHandle(atMatch[1]);
+    } catch {
+      // Fall through.
+    }
+  }
+
+  // Next strongest signal: an instagram.com URL anywhere in the reply.
+  const urlMatch = trimmed.match(/(https?:\/\/)?(?:www\.|m\.)?instagram\.com\/[a-zA-Z0-9._/?=&-]+/i);
+  if (urlMatch) {
+    try {
+      return normalizeIgHandle(urlMatch[0]);
+    } catch {
+      // Fall through.
+    }
+  }
+
+  return null;
+}
+
 export type FetchInstagramProfileOptions = {
   /** Cap on how many posts we want to keep after the actor returns. */
   postsLimit?: number;
