@@ -37,6 +37,16 @@ describe('normalizeIgHandle', () => {
     ['humansofny', 'humansofny'],
     ['humansofny/', 'humansofny'],
     ['  HumansOfNY  ', 'humansofny'],
+    ['@@nike', 'nike'],
+    ['ob.cocktails', 'ob.cocktails'],
+    ['https://www.instagram.com/nike/', 'nike'],
+    ['https://www.instagram.com/nike', 'nike'],
+    ['https://instagram.com/nike?hl=en', 'nike'],
+    ['http://m.instagram.com/nike/', 'nike'],
+    ['instagram.com/nike', 'nike'],
+    ['www.instagram.com/nike/', 'nike'],
+    ['https://www.instagram.com/nike/p/CabcDEF/', 'nike'],
+    ['https://www.instagram.com/nike/reel/Xyz/', 'nike'],
   ])('normalizes %s -> %s', (input, expected) => {
     expect(normalizeIgHandle(input)).toBe(expected);
   });
@@ -45,6 +55,13 @@ describe('normalizeIgHandle', () => {
     expect(() => normalizeIgHandle('')).toThrow(InstagramScraperError);
     expect(() => normalizeIgHandle('   ')).toThrow(InstagramScraperError);
     expect(() => normalizeIgHandle('foo bar')).toThrow(InstagramScraperError);
+  });
+
+  it('rejects non-instagram URLs', () => {
+    expect(() => normalizeIgHandle('https://twitter.com/nike')).toThrow(InstagramScraperError);
+    expect(() => normalizeIgHandle('https://www.instagram.com/p/abc/')).toThrow(
+      InstagramScraperError,
+    );
   });
 });
 

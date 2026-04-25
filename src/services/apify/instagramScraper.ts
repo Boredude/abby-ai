@@ -69,12 +69,60 @@ function getClient(): ApifyClient {
 }
 
 /**
- * Strip the leading `@` and any trailing slash, lowercase the result.
- * Throws if the handle is empty or contains whitespace.
+ * Coerce whatever the user typed into a bare Instagram username:
+ *   `@nike`                              → nike
+ *   `nike`                               → nike
+ *   `Nike/`                              → nike
+ *   `https://www.instagram.com/nike`     → nike
+ *   `https://www.instagram.com/nike/?hl=en` → nike
+ *   `instagram.com/nike/p/Abc123/`       → nike
+ *   `https://m.instagram.com/_/nike/`    → nike
+ * Throws if no valid username can be extracted.
  */
 export function normalizeIgHandle(input: string): string {
-  const trimmed = input.trim().replace(/^@/, '').replace(/\/$/, '').toLowerCase();
-  if (!trimmed || /\s/.test(trimmed)) {
+  if (typeof input !== 'string') {
+    throw new InstagramScraperError('not_found', 'Invalid Instagram handle: not a string');
+  }
+  let raw = input.trim();
+  if (!raw) {
+    throw new InstagramScraperError('not_found', `Invalid Instagram handle: "${input}"`);
+  }
+
+  // If it looks like a URL or has an instagram.com host, parse as URL.
+  const looksLikeUrl = /^https?:\/\//i.test(raw) || /(^|[^\w])instagram\.com\//i.test(raw);
+  if (looksLikeUrl) {
+    const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    let url: URL;
+    try {
+      url = new URL(withProtocol);
+    } catch {
+      throw new InstagramScraperError('not_found', `Invalid Instagram URL: "${input}"`);
+    }
+    if (!/(^|\.)instagram\.com$/i.test(url.hostname)) {
+      throw new InstagramScraperError(
+        'not_found',
+        `Not an instagram.com URL: "${input}"`,
+      );
+    }
+    // The username must be the FIRST path segment; anything else (e.g. /p/,
+    // /reel/, /explore/) is an IG-internal route, not a profile.
+    const reserved = new Set([
+      'p', 'reel', 'reels', 'tv', 'stories', 'explore', 'accounts', 'direct',
+      'web', 'about', 'developer', 'legal', 'press', '_u',
+    ]);
+    const segments = url.pathname.split('/').filter(Boolean);
+    const first = segments[0];
+    if (!first || reserved.has(first.toLowerCase())) {
+      throw new InstagramScraperError(
+        'not_found',
+        `Could not find a username in URL: "${input}"`,
+      );
+    }
+    raw = first;
+  }
+
+  const trimmed = raw.trim().replace(/^@+/, '').replace(/\/+$/, '').toLowerCase();
+  if (!trimmed || /\s/.test(trimmed) || !/^[a-z0-9._]+$/.test(trimmed)) {
     throw new InstagramScraperError('not_found', `Invalid Instagram handle: "${input}"`);
   }
   return trimmed;
