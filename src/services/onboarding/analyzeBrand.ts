@@ -40,7 +40,12 @@ function classifyAnalyzerError(err: unknown): 'service_unavailable' | 'unknown' 
     msg.includes('overloaded') ||
     msg.includes('unauthorized') ||
     msg.includes('authentication') ||
-    msg.includes('api key')
+    msg.includes('api key') ||
+    // Anthropic refuses to fetch URL-based images that the target's robots.txt
+    // disallows. That's our infra problem (we should send bytes), not the
+    // user's handle being wrong.
+    msg.includes('robots.txt') ||
+    msg.includes('disallowed')
   ) {
     return 'service_unavailable';
   }

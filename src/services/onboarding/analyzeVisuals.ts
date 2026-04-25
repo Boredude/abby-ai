@@ -84,13 +84,35 @@ export async function analyzeInstagramVisuals(input: AnalyzeVisualsInput): Promi
     throw new Error('analyzeInstagramVisuals: no image URLs provided');
   }
 
+  // Anthropic fetches URL-based images themselves and respects the target's
+  // robots.txt. Instagram's CDN disallows that, so we download the bytes here
+  // and send them inline. Failed downloads are skipped so a single broken/
+  // expired CDN URL doesn't kill the whole analysis.
+  const fetched = await Promise.all(
+    urls.map(async (url, idx) => {
+      try {
+        return await downloadImage(url);
+      } catch (err) {
+        log.warn({ err, url, idx }, 'Failed to download IG image; skipping');
+        return null;
+      }
+    }),
+  );
+  const images = fetched.filter((x): x is { bytes: Uint8Array; mediaType: string } => x !== null);
+  if (images.length === 0) {
+    throw new Error('analyzeInstagramVisuals: every image download failed');
+  }
+
   const modelId = stripGatewayPrefix(env.ONBOARDING_AGENT_MODEL);
-  log.info({ modelId, imageCount: urls.length }, 'Running visual analysis');
+  log.info(
+    { modelId, requested: urls.length, sent: images.length },
+    'Running visual analysis',
+  );
 
   const userText = [
     `Brand handle: @${input.handle}`,
     input.brandHint ? `Owner-provided context: ${input.brandHint}` : '',
-    `I'm sending you ${urls.length} recent Instagram posts in order.`,
+    `I'm sending you ${images.length} recent Instagram posts in order.`,
     'Extract the brand kit + design system that ties them together.',
   ]
     .filter(Boolean)
@@ -104,7 +126,11 @@ export async function analyzeInstagramVisuals(input: AnalyzeVisualsInput): Promi
         role: 'user',
         content: [
           { type: 'text', text: userText },
-          ...urls.map((url) => ({ type: 'image' as const, image: new URL(url) })),
+          ...images.map((img) => ({
+            type: 'image' as const,
+            image: img.bytes,
+            mediaType: img.mediaType,
+          })),
         ],
       },
     ],
@@ -112,6 +138,40 @@ export async function analyzeInstagramVisuals(input: AnalyzeVisualsInput): Promi
   });
 
   return object;
+}
+
+/**
+ * Download an image and return the raw bytes + the MIME type to declare to
+ * the model. Anthropic accepts jpeg/png/gif/webp; if the server doesn't tell
+ * us a usable type, we fall back to image/jpeg (which is what IG's CDN
+ * actually serves).
+ */
+async function downloadImage(url: string): Promise<{ bytes: Uint8Array; mediaType: string }> {
+  const res = await fetch(url, {
+    headers: {
+      // IG CDN sometimes returns 403 without a browsery UA / referer.
+      'user-agent':
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+      accept: 'image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8,*/*;q=0.5',
+      referer: 'https://www.instagram.com/',
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status} fetching image`);
+  }
+  const buf = new Uint8Array(await res.arrayBuffer());
+  const ct = (res.headers.get('content-type') ?? '').toLowerCase();
+  const mediaType =
+    ct.startsWith('image/jpeg') || ct.startsWith('image/jpg')
+      ? 'image/jpeg'
+      : ct.startsWith('image/png')
+        ? 'image/png'
+        : ct.startsWith('image/webp')
+          ? 'image/webp'
+          : ct.startsWith('image/gif')
+            ? 'image/gif'
+            : 'image/jpeg';
+  return { bytes: buf, mediaType };
 }
 
 /**
