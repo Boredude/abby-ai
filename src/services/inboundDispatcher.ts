@@ -1,7 +1,7 @@
 import { logger } from '../config/logger.js';
 import { upsertBrandByPhone } from '../db/repositories/brands.js';
 import { findActiveRunForBrand, findRunByDraft } from '../db/repositories/workflowRuns.js';
-import { getAbbyAgent } from '../mastra/agents/abby.js';
+import { getDuffyAgent } from '../mastra/agents/duffy.js';
 import { sendText } from './kapso/client.js';
 import type { ParsedInboundMessage } from './kapso/inboundParser.js';
 import { handleSlashCommand, isSlashCommand } from './slashCommands.js';
@@ -72,7 +72,7 @@ function buildResumeDataFor(workflowId: string, parsed: ParsedInboundMessage): R
  *     draft a button refers to), resume it with the user's reply.
  *  2. Otherwise, if the brand is brand-new (status pending), start the
  *     brandOnboarding workflow.
- *  3. Otherwise, hand off to the Abby agent for free-form chat.
+ *  3. Otherwise, hand off to the Duffy agent for free-form chat.
  */
 export async function dispatchInboundMessage(parsed: ParsedInboundMessage): Promise<void> {
   // Slash commands run before any brand/workflow plumbing so they can wipe
@@ -122,13 +122,13 @@ export async function dispatchInboundMessage(parsed: ParsedInboundMessage): Prom
       });
     } catch (err) {
       log.error({ err }, 'Failed to start brandOnboarding');
-      await sendText(parsed.fromPhone, "Hey! I'm Abby. I had a small hiccup starting up — give me a minute and try again?");
+      await sendText(parsed.fromPhone, "Hey! I'm Duffy. I had a small hiccup starting up — give me a minute and try again?");
     }
     return;
   }
 
   // Already-onboarded brand: free chat with the agent.
-  const agent = getAbbyAgent();
+  const agent = getDuffyAgent();
   const prompt = buildUserPrompt(parsed, brand.id);
 
   let reply: string;
@@ -136,7 +136,7 @@ export async function dispatchInboundMessage(parsed: ParsedInboundMessage): Prom
     const result = await agent.generate(prompt, { memory: memoryFor(brand.id) });
     reply = (result as { text?: string }).text?.trim() ?? '';
   } catch (err) {
-    log.error({ err }, 'Abby agent generate failed');
+    log.error({ err }, 'Duffy agent generate failed');
     reply = 'Sorry, I hit a snag on my end. Mind sending that again in a moment?';
   }
 

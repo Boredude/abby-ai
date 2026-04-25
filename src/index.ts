@@ -26,7 +26,7 @@ async function main(): Promise<void> {
   await startWorkers();
 
   const server = serve({ fetch: app.fetch, port: env.PORT }, (info) => {
-    logger.info({ port: info.port, env: env.NODE_ENV }, 'Abby HTTP server listening');
+    logger.info({ port: info.port, env: env.NODE_ENV }, 'Duffy HTTP server listening');
   });
 
   let shuttingDown = false;

@@ -3,7 +3,7 @@ import type { Brand } from '../../db/schema.js';
 /**
  * Deterministic WhatsApp-friendly recap of a brand's saved kit, voice, and
  * design system. Built from DB state so the user always sees the conclusions
- * — independent of whatever Abby's chat reply happens to contain.
+ * — independent of whatever Duffy's chat reply happens to contain.
  */
 export function buildBrandKitRecap(brand: Brand): string {
   const handle = brand.igHandle ?? 'your brand';

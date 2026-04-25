@@ -9,7 +9,7 @@ vi.mock('@mastra/memory', () => ({
   Memory: vi.fn().mockImplementation(() => ({})),
 }));
 
-import { getAbbyAgent } from '../../src/mastra/agents/abby.js';
+import { getDuffyAgent } from '../../src/mastra/agents/duffy.js';
 import { getOnboardingAgent } from '../../src/mastra/agents/onboarding.js';
 
 describe('agent wiring', () => {
@@ -26,17 +26,17 @@ describe('agent wiring', () => {
     ]);
   });
 
-  it('builds Abby with onboardingAgent registered as a sub-agent', async () => {
-    const abby = getAbbyAgent();
-    expect(abby.id).toBe('abby');
-    const tools = await abby.listTools();
+  it('builds Duffy with onboardingAgent registered as a sub-agent', async () => {
+    const duffy = getDuffyAgent();
+    expect(duffy.id).toBe('duffy');
+    const tools = await duffy.listTools();
     expect(Object.keys(tools).sort()).toEqual([
       'generateImage',
       'getBrandProfile',
       'updateBrandProfile',
     ]);
 
-    const subs = await abby.listAgents();
+    const subs = await duffy.listAgents();
     expect(Object.keys(subs)).toContain('onboardingAgent');
     expect(subs.onboardingAgent?.id).toBe('onboardingAgent');
   });

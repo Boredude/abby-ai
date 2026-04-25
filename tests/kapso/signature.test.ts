@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createHmac } from 'node:crypto';
 import { verifyKapsoSignature } from '../../src/services/kapso/signature.js';
 
-const SECRET = 'whsec_test_abby';
+const SECRET = 'whsec_test_duffy';
 
 function sign(body: string, secret = SECRET): string {
   return createHmac('sha256', secret).update(body, 'utf8').digest('hex');

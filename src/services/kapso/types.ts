@@ -1,5 +1,5 @@
 /**
- * Minimal Kapso WhatsApp API types covering only what Abby uses today.
+ * Minimal Kapso WhatsApp API types covering only what Duffy uses today.
  * Reference: https://docs.kapso.ai/api/meta/whatsapp/messages/send-a-message
  */
 

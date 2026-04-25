@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { findBrandById, updateBrand } from '../../db/repositories/brands.js';
 import { sendImage, sendText } from '../../services/kapso/client.js';
 import { logger } from '../../config/logger.js';
-import { getAbbyAgent } from '../agents/abby.js';
+import { getDuffyAgent } from '../agents/duffy.js';
 import { analyzeBrand } from '../../services/onboarding/analyzeBrand.js';
 import {
   InstagramScraperError,
@@ -20,6 +20,7 @@ import {
   buildBrandBoardCaption,
   generateBrandBoard,
 } from '../../services/onboarding/brandBoardImage.js';
+import { sayInDuffyVoice } from '../../services/onboarding/voice.js';
 import type { Brand, BrandCadence } from '../../db/schema.js';
 
 /**
@@ -32,7 +33,7 @@ import type { Brand, BrandCadence } from '../../db/schema.js';
  *      review prompt. The user can:
  *        - approve ("yes", "lock it in", …) → move on
  *        - send a different handle → re-run analysis on the new handle
- *        - send free-form feedback → Abby applies it via updateBrandProfile
+ *        - send free-form feedback → Duffy applies it via updateBrandProfile
  *      If the scrape failed, we ask the user to send another handle and
  *      retry instead of accepting any reply as approval. The analysis runs
  *      as plain code (not via an agent) so it always actually happens.
@@ -67,7 +68,13 @@ async function presentBrandKitToUser(
 ): Promise<void> {
   try {
     const { url } = await generateBrandBoard(brand, opts);
-    await sendImage(phone, url, buildBrandBoardCaption(brand));
+    const caption = await sayInDuffyVoice({
+      intent: 'brand_board_caption',
+      brandId: brand.id,
+      context: { igHandle: brand.igHandle },
+      fallback: buildBrandBoardCaption(brand),
+    });
+    await sendImage(phone, url, caption);
   } catch (err) {
     logger.error(
       { err, brandId: brand.id },
@@ -75,7 +82,15 @@ async function presentBrandKitToUser(
     );
     await sendText(phone, buildBrandKitRecap(brand));
   }
-  await sendText(phone, REVIEW_PROMPT);
+  await sendText(
+    phone,
+    await sayInDuffyVoice({
+      intent: 'review_brand_kit_prompt',
+      brandId: brand.id,
+      context: { igHandle: brand.igHandle },
+      fallback: REVIEW_PROMPT,
+    }),
+  );
 }
 
 const askIgHandle = createStep({
@@ -90,7 +105,12 @@ const askIgHandle = createStep({
       await updateBrand(inputData.brandId, { status: 'onboarding' });
       await sendText(
         phone,
-        "Hey, I'm Abby — your AI content partner. I'll help you plan and draft Instagram posts. To start, what's your Instagram handle?",
+        await sayInDuffyVoice({
+          intent: 'greet_and_ask_handle',
+          brandId: inputData.brandId,
+          fallback:
+            "Hey, I'm Duffy — your AI content partner. I'll help you plan and draft Instagram posts. To start, what's your Instagram handle?",
+        }),
       );
       await suspend({ question: 'ig_handle' });
       return undefined as never;
@@ -101,9 +121,26 @@ const askIgHandle = createStep({
     } catch (err) {
       if (!(err instanceof InstagramScraperError)) throw err;
       const phone = await getBrandPhone(inputData.brandId);
+      // If the user replied with something that doesn't even resemble a handle
+      // (e.g. "what can you do?" or "wdym?"), treat it as an off-script
+      // question and let Duffy actually react before re-asking. This avoids the
+      // "two identical canned replies" UX bug where any non-handle reply hit
+      // the same hardcoded "that doesn't look like a valid handle" message.
+      const intent = looksLikeHandle(resumeData.reply)
+        ? 'ig_handle_invalid_format'
+        : 'off_script_during_handle_ask';
+      const fallback =
+        intent === 'off_script_during_handle_ask'
+          ? "Good question — but first I need your Instagram handle to get started. Send your username (like @nike) or the full instagram.com link?"
+          : "That doesn't look like a valid Instagram handle. Send your username (like @nike, nike, or the full instagram.com link) and I'll try again.";
       await sendText(
         phone,
-        "That doesn't look like a valid Instagram handle. Send your username (like `@nike`, `nike`, or the full instagram.com link) and I'll try again.",
+        await sayInDuffyVoice({
+          intent,
+          brandId: inputData.brandId,
+          context: { userMessage: resumeData.reply },
+          fallback,
+        }),
       );
       await suspend({ question: 'ig_handle' });
       return undefined as never;
@@ -120,7 +157,12 @@ async function presentBrandKitOrAskRetry(
   const phone = await getBrandPhone(brandId);
   await sendText(
     phone,
-    `Awesome — diving into @${handle} now. Give me a moment to study the feed.`,
+    await sayInDuffyVoice({
+      intent: 'analysis_starting',
+      brandId,
+      context: { igHandle: handle },
+      fallback: `Diving into @${handle} now — give me a moment to study the feed.`,
+    }),
   );
 
   const result = await analyzeBrand({ brandId, handle });
@@ -132,19 +174,40 @@ async function presentBrandKitOrAskRetry(
     if (result.reason === 'service_unavailable') {
       await sendText(
         phone,
-        `Argh — I hit a temporary hiccup on my side analyzing @${handle}. Reply 'retry' in a couple of minutes and I'll try again, or send a different handle if you'd like.`,
+        await sayInDuffyVoice({
+          intent: 'analysis_failed_service_unavailable',
+          brandId,
+          context: { igHandle: handle },
+          fallback: `Argh — hit a temporary hiccup on my side analyzing @${handle}. Reply 'retry' in a couple of minutes, or send a different handle.`,
+        }),
       );
       return 'service_unavailable';
     }
-    const msg =
+    const intent =
       result.reason === 'private'
-        ? `@${handle} looks private — I can only analyze public accounts. Send a different handle (without the @) and I'll try again.`
+        ? 'analysis_failed_private'
         : result.reason === 'not_found'
-          ? `I couldn't find @${handle} on Instagram. Double-check the spelling and send it again (without the @)?`
+          ? 'analysis_failed_not_found'
           : result.reason === 'empty'
-            ? `@${handle} doesn't have any posts I can analyze yet. Send a different handle to try?`
+            ? 'analysis_failed_empty'
+            : 'analysis_failed_retry_handle';
+    const fallback =
+      result.reason === 'private'
+        ? `@${handle} looks private — I can only analyze public accounts. Send a different handle (without the @).`
+        : result.reason === 'not_found'
+          ? `Couldn't find @${handle} on Instagram. Double-check the spelling and send it again (without the @)?`
+          : result.reason === 'empty'
+            ? `@${handle} doesn't have any posts I can analyze yet. Send a different handle?`
             : RETRY_HANDLE_PROMPT;
-    await sendText(phone, msg);
+    await sendText(
+      phone,
+      await sayInDuffyVoice({
+        intent,
+        brandId,
+        context: { igHandle: handle },
+        fallback,
+      }),
+    );
     return 'retry_handle';
   }
 
@@ -191,7 +254,14 @@ const runAnalysisAndConfirm = createStep({
         newHandle = normalizeIgHandle(reply);
       } catch (err) {
         if (!(err instanceof InstagramScraperError)) throw err;
-        await sendText(phone, RETRY_HANDLE_PROMPT);
+        await sendText(
+          phone,
+          await sayInDuffyVoice({
+            intent: 'analysis_failed_retry_handle',
+            brandId: inputData.brandId,
+            fallback: RETRY_HANDLE_PROMPT,
+          }),
+        );
         await suspend({ question: 'brand_kit_review', mode: 'retry_handle' });
         return undefined as never;
       }
@@ -229,9 +299,9 @@ const runAnalysisAndConfirm = createStep({
       }
     }
 
-    // Branch 4: free-form edit feedback → let Abby apply it.
+    // Branch 4: free-form edit feedback → let Duffy apply it.
     try {
-      const abby = getAbbyAgent();
+      const duffy = getDuffyAgent();
       const prompt = [
         `[brandId=${inputData.brandId}]`,
         `The user reviewed the brand kit and wants to tweak something.`,
@@ -239,21 +309,35 @@ const runAnalysisAndConfirm = createStep({
         `Apply the change with updateBrandProfile if it maps to voice/cadence/timezone.`,
         `Keep your reply short — confirm what changed in one sentence.`,
       ].join(' ');
-      const result = await abby.generate(prompt, {
+      const result = await duffy.generate(prompt, {
         memory: { thread: `brand:${inputData.brandId}`, resource: inputData.brandId },
       });
       const text = (result as { text?: string }).text?.trim() ?? '';
       if (text) await sendText(phone, text);
     } catch (err) {
       logger.error({ err, brandId: inputData.brandId }, 'Brand kit edit handling failed');
-      await sendText(phone, "Hit a snag applying that — mind rephrasing the change?");
+      await sendText(
+        phone,
+        await sayInDuffyVoice({
+          intent: 'edit_apply_failed',
+          brandId: inputData.brandId,
+          fallback: 'Hit a snag applying that — mind rephrasing the change?',
+        }),
+      );
     }
 
     const refreshed = await findBrandById(inputData.brandId);
     if (refreshed) {
       await presentBrandKitToUser(refreshed, phone, { force: true });
     } else {
-      await sendText(phone, REVIEW_PROMPT);
+      await sendText(
+        phone,
+        await sayInDuffyVoice({
+          intent: 'review_brand_kit_prompt',
+          brandId: inputData.brandId,
+          fallback: REVIEW_PROMPT,
+        }),
+      );
     }
     await suspend({ question: 'brand_kit_review', mode: 'reviewing' });
     return undefined as never;
@@ -271,7 +355,12 @@ const askCadenceTimezoneOrFinalize = createStep({
       const phone = await getBrandPhone(inputData.brandId);
       await sendText(
         phone,
-        "Locked in. Two quick last things and we're set: how often do you want to post (e.g. \"3 a week, mornings\") and what's your timezone (e.g. America/New_York)?",
+        await sayInDuffyVoice({
+          intent: 'cadence_timezone_question',
+          brandId: inputData.brandId,
+          fallback:
+            'Locked in. Two quick last things and we\'re set: how often do you want to post (e.g. "3 a week, mornings") and what\'s your timezone (e.g. America/New_York)?',
+        }),
       );
       await suspend({ question: 'cadence_and_timezone' });
       return undefined as never;
@@ -287,7 +376,7 @@ const askCadenceTimezoneOrFinalize = createStep({
     const brand = await findBrandById(inputData.brandId);
     if (!brand) throw new Error(`Brand ${inputData.brandId} not found`);
 
-    const summary = [
+    const fallbackSummary = [
       `Perfect, you're all set! 🎉`,
       `• Instagram: @${brand.igHandle}`,
       `• Posts/week: ${cadence.postsPerWeek}`,
@@ -295,7 +384,19 @@ const askCadenceTimezoneOrFinalize = createStep({
       ``,
       `I'll start drafting posts and check in with you over the week. Reply any time if you want to brainstorm something.`,
     ].join('\n');
-    await sendText(brand.waPhone, summary);
+    await sendText(
+      brand.waPhone,
+      await sayInDuffyVoice({
+        intent: 'onboarding_complete_summary',
+        brandId: brand.id,
+        context: {
+          igHandle: brand.igHandle,
+          postsPerWeek: cadence.postsPerWeek,
+          timezone,
+        },
+        fallback: fallbackSummary,
+      }),
+    );
     logger.info({ brandId: brand.id }, 'Brand onboarding complete');
 
     return { brandId: inputData.brandId, status: 'active' as const };

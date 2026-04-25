@@ -1,4 +1,4 @@
-import { getAbbyAgent } from './abby.js';
+import { getDuffyAgent } from './duffy.js';
 import { getOnboardingAgent } from './onboarding.js';
 
 /**
@@ -7,7 +7,7 @@ import { getOnboardingAgent } from './onboarding.js';
  */
 export function buildAgents() {
   return {
-    abby: getAbbyAgent(),
+    duffy: getDuffyAgent(),
     onboardingAgent: getOnboardingAgent(),
   };
 }

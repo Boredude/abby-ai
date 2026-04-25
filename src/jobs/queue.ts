@@ -5,9 +5,9 @@ import { logger } from '../config/logger.js';
 let boss: PgBoss | null = null;
 
 export const QUEUES = {
-  deliverApprovedPost: 'abby.deliver-approved-post',
-  weeklyPlanning: 'abby.weekly-planning',
-  approvalReminder: 'abby.approval-reminder',
+  deliverApprovedPost: 'duffy.deliver-approved-post',
+  weeklyPlanning: 'duffy.weekly-planning',
+  approvalReminder: 'duffy.approval-reminder',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
