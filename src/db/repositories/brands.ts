@@ -1,6 +1,15 @@
 import { eq, sql } from 'drizzle-orm';
 import { getDb } from '../client.js';
-import { brands, type Brand, type NewBrand, type BrandVoice, type BrandCadence } from '../schema.js';
+import {
+  brands,
+  type Brand,
+  type NewBrand,
+  type BrandVoice,
+  type BrandCadence,
+  type BrandKit,
+  type BrandDesignSystem,
+  type IgAnalysisSnapshot,
+} from '../schema.js';
 
 export async function listActiveBrands(): Promise<Brand[]> {
   const db = getDb();
@@ -41,6 +50,9 @@ export async function updateBrand(
     igHandle: string | null;
     voiceJson: BrandVoice | null;
     cadenceJson: BrandCadence | null;
+    brandKitJson: BrandKit | null;
+    designSystemJson: BrandDesignSystem | null;
+    igAnalysisJson: IgAnalysisSnapshot | null;
     timezone: string;
     status: Brand['status'];
   }>,

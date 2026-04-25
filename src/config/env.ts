@@ -18,6 +18,12 @@ const schema = z.object({
   OPENAI_TEXT_MODEL: z.string().default('gpt-4.1'),
   OPENAI_IMAGE_MODEL: z.string().default('gpt-image-2'),
 
+  ANTHROPIC_API_KEY: z.string().min(1, 'ANTHROPIC_API_KEY is required'),
+  ABBY_ORCHESTRATOR_MODEL: z.string().default('anthropic/claude-haiku-4-5'),
+  ONBOARDING_AGENT_MODEL: z.string().default('anthropic/claude-sonnet-4-5'),
+
+  APIFY_TOKEN: z.string().min(1, 'APIFY_TOKEN is required'),
+
   R2_ACCOUNT_ID: z.string().min(1, 'R2_ACCOUNT_ID is required'),
   R2_ACCESS_KEY_ID: z.string().min(1, 'R2_ACCESS_KEY_ID is required'),
   R2_SECRET_ACCESS_KEY: z.string().min(1, 'R2_SECRET_ACCESS_KEY is required'),

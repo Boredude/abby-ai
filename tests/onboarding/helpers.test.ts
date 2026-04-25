@@ -13,10 +13,8 @@ describe('brandOnboarding workflow shape', () => {
       .filter(Boolean);
     expect(stepIds).toEqual([
       'ask-ig-handle',
-      'ask-brand-description',
-      'ask-cadence',
-      'ask-timezone',
-      'finalize',
+      'run-analysis-and-confirm',
+      'ask-cadence-timezone-or-finalize',
     ]);
   });
 });

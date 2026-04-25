@@ -44,6 +44,9 @@ export const brands = pgTable(
     igHandle: text('ig_handle'),
     voiceJson: jsonb('voice_json').$type<BrandVoice | null>().default(null),
     cadenceJson: jsonb('cadence_json').$type<BrandCadence | null>().default(null),
+    brandKitJson: jsonb('brand_kit_json').$type<BrandKit | null>().default(null),
+    designSystemJson: jsonb('design_system_json').$type<BrandDesignSystem | null>().default(null),
+    igAnalysisJson: jsonb('ig_analysis_json').$type<IgAnalysisSnapshot | null>().default(null),
     timezone: text('timezone').default('UTC').notNull(),
     status: brandStatusEnum('status').default('pending').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -144,6 +147,9 @@ export type BrandVoice = {
   do: string[];
   dont: string[];
   hashtags?: string[];
+  themes?: string[];
+  emojiUsage?: 'none' | 'sparing' | 'frequent';
+  hashtagPolicy?: string;
 };
 
 export type BrandCadence = {
@@ -155,6 +161,57 @@ export type BrandCadence = {
 export type EditNote = {
   at: string;
   note: string;
+};
+
+export type BrandPaletteEntry = {
+  hex: string;
+  role: 'primary' | 'secondary' | 'accent' | 'background' | 'text' | 'other';
+  name?: string;
+};
+
+export type BrandKit = {
+  palette: BrandPaletteEntry[];
+  typography: {
+    mood: string;
+    sample?: string;
+  };
+  logoNotes?: string;
+};
+
+export type BrandDesignSystem = {
+  photoStyle: string;
+  illustrationStyle: string;
+  composition: string;
+  lighting: string;
+  recurringMotifs: string[];
+  doVisuals: string[];
+  dontVisuals: string[];
+};
+
+export type IgAnalysisSnapshot = {
+  capturedAt: string;
+  handle: string;
+  profile: {
+    fullName?: string;
+    biography?: string;
+    followers?: number;
+    following?: number;
+    postsCount?: number;
+    profilePicUrl?: string;
+    isVerified?: boolean;
+    externalUrl?: string;
+  };
+  posts: Array<{
+    url: string;
+    imageUrl: string;
+    caption: string;
+    likes?: number;
+    comments?: number;
+    timestamp?: string;
+    type?: 'image' | 'video' | 'sidecar' | 'reel';
+  }>;
+  rawVisuals?: unknown;
+  rawVoice?: unknown;
 };
 
 // ---- Inferred row types ----

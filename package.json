@@ -17,9 +17,11 @@
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "reset-brand": "tsx src/scripts/resetBrand.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.71",
     "@ai-sdk/openai": "^3.0.53",
     "@aws-sdk/client-s3": "^3.726.0",
     "@aws-sdk/s3-request-presigner": "^3.726.0",
@@ -28,6 +30,7 @@
     "@mastra/memory": "^1.17.1",
     "@mastra/pg": "^1.9.2",
     "ai": "^6.0.168",
+    "apify-client": "^2.23.0",
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.15",

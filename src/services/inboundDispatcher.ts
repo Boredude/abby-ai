@@ -4,6 +4,7 @@ import { findActiveRunForBrand, findRunByDraft } from '../db/repositories/workfl
 import { getAbbyAgent } from '../mastra/agents/abby.js';
 import { sendText } from './kapso/client.js';
 import type { ParsedInboundMessage } from './kapso/inboundParser.js';
+import { handleSlashCommand, isSlashCommand } from './slashCommands.js';
 import { resumeWorkflow, startWorkflow } from './workflowRunner.js';
 
 function memoryFor(brandId: string): { thread: string; resource: string } {
@@ -74,6 +75,13 @@ function buildResumeDataFor(workflowId: string, parsed: ParsedInboundMessage): R
  *  3. Otherwise, hand off to the Abby agent for free-form chat.
  */
 export async function dispatchInboundMessage(parsed: ParsedInboundMessage): Promise<void> {
+  // Slash commands run before any brand/workflow plumbing so they can wipe
+  // state cleanly (e.g. `/reset` deletes the brand row entirely).
+  if (isSlashCommand(parsed)) {
+    await handleSlashCommand(parsed);
+    return;
+  }
+
   const brand = await upsertBrandByPhone({ waPhone: parsed.fromPhone });
   const log = logger.child({ brandId: brand.id, fromPhone: parsed.fromPhone, kind: parsed.kind });
   log.info('Inbound message received');

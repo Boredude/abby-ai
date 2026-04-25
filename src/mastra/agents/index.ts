@@ -1,12 +1,14 @@
 import { getAbbyAgent } from './abby.js';
+import { getOnboardingAgent } from './onboarding.js';
 
 /**
- * Lazy registry. We construct the agent on first access so that env validation
+ * Lazy registry. We construct each agent on first access so that env validation
  * surfaces only once it's actually needed (helpful for tests).
  */
 export function buildAgents() {
   return {
     abby: getAbbyAgent(),
+    onboardingAgent: getOnboardingAgent(),
   };
 }
 
