@@ -131,6 +131,9 @@ export async function analyzeBrand(input: {
     designSystemJson: synthesized.designSystem,
     voiceJson: synthesized.voice,
     igAnalysisJson: synthesized.igAnalysis,
+    // Invalidate any previously-generated brand board: the kit just changed,
+    // so the next presentation step must regenerate from the new JSON.
+    brandBoardImageUrl: null,
   });
 
   log.info('Brand analysis succeeded and persisted');
