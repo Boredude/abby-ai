@@ -4,19 +4,34 @@ import { findBrandById, updateBrand } from '../../db/repositories/brands.js';
 import { sendText } from '../../services/kapso/client.js';
 import { logger } from '../../config/logger.js';
 import { getAbbyAgent } from '../agents/abby.js';
+import { analyzeBrand } from '../../services/onboarding/analyzeBrand.js';
+import {
+  InstagramScraperError,
+  normalizeIgHandle,
+} from '../../services/apify/instagramScraper.js';
+import {
+  REVIEW_PROMPT,
+  RETRY_HANDLE_PROMPT,
+  buildBrandKitRecap,
+  isExplicitApproval,
+  looksLikeHandle,
+} from '../../services/onboarding/recap.js';
 import type { BrandCadence } from '../../db/schema.js';
 
 /**
- * Brand onboarding workflow (v2 — agent-driven).
- *
- * The new flow does the bare minimum of structured Q&A and lets the
- * OnboardingAgent (delegated by Abby) do the heavy lifting:
+ * Brand onboarding workflow (v3 — analyze + review).
  *
  *   1. ask-ig-handle              → ask only for the IG handle.
- *   2. run-analysis-and-confirm   → kick off Abby, who delegates to
- *      OnboardingAgent. The agent fetches IG, runs visual + voice analyses,
- *      saves the brand kit, then sends the recap on WA. We suspend here
- *      until the user confirms or asks for edits.
+ *   2. run-analysis-and-confirm   → call `analyzeBrand` directly (Apify scrape
+ *      + visual + voice analysis + persist) and then send the user a
+ *      structured recap built from the persisted brand kit, with an explicit
+ *      review prompt. The user can:
+ *        - approve ("yes", "lock it in", …) → move on
+ *        - send a different handle → re-run analysis on the new handle
+ *        - send free-form feedback → Abby applies it via updateBrandProfile
+ *      If the scrape failed, we ask the user to send another handle and
+ *      retry instead of accepting any reply as approval. The analysis runs
+ *      as plain code (not via an agent) so it always actually happens.
  *   3. ask-cadence-timezone-or-finalize → one combined question for cadence
  *      + timezone, then mark the brand active.
  *
@@ -50,10 +65,62 @@ const askIgHandle = createStep({
       await suspend({ question: 'ig_handle' });
       return undefined as never;
     }
-    const igHandle = resumeData.reply.replace(/^@/, '').trim();
+    let igHandle: string;
+    try {
+      igHandle = normalizeIgHandle(resumeData.reply);
+    } catch (err) {
+      if (!(err instanceof InstagramScraperError)) throw err;
+      const phone = await getBrandPhone(inputData.brandId);
+      await sendText(
+        phone,
+        "That doesn't look like a valid Instagram handle. Send your username (like `@nike`, `nike`, or the full instagram.com link) and I'll try again.",
+      );
+      await suspend({ question: 'ig_handle' });
+      return undefined as never;
+    }
     await updateBrand(inputData.brandId, { igHandle });
     return { brandId: inputData.brandId, igHandle };
   },
+});
+
+async function presentBrandKitOrAskRetry(
+  brandId: string,
+  handle: string,
+): Promise<'reviewing' | 'retry_handle'> {
+  const phone = await getBrandPhone(brandId);
+  await sendText(
+    phone,
+    `Awesome — diving into @${handle} now. Give me a moment to study the feed.`,
+  );
+
+  const result = await analyzeBrand({ brandId, handle });
+  if (!result.ok) {
+    logger.warn(
+      { brandId, handle, reason: result.reason },
+      'Onboarding analysis failed; asking user for another handle',
+    );
+    const msg =
+      result.reason === 'private'
+        ? `@${handle} looks private — I can only analyze public accounts. Send a different handle (without the @) and I'll try again.`
+        : result.reason === 'not_found'
+          ? `I couldn't find @${handle} on Instagram. Double-check the spelling and send it again (without the @)?`
+          : result.reason === 'empty'
+            ? `@${handle} doesn't have any posts I can analyze yet. Send a different handle to try?`
+            : RETRY_HANDLE_PROMPT;
+    await sendText(phone, msg);
+    return 'retry_handle';
+  }
+
+  const brand = await findBrandById(brandId);
+  if (!brand) throw new Error(`Brand ${brandId} not found`);
+  await sendText(phone, buildBrandKitRecap(brand));
+  await sendText(phone, REVIEW_PROMPT);
+  return 'reviewing';
+}
+
+const reviewSuspendSchema = z.object({
+  question: z.string(),
+  mode: z.enum(['reviewing', 'retry_handle']),
 });
 
 const runAnalysisAndConfirm = createStep({
@@ -61,71 +128,89 @@ const runAnalysisAndConfirm = createStep({
   inputSchema: z.object({ brandId: z.string(), igHandle: z.string() }),
   outputSchema: z.object({ brandId: z.string(), confirmed: z.boolean() }),
   resumeSchema: replySchema,
-  suspendSchema,
+  suspendSchema: reviewSuspendSchema,
   execute: async ({ inputData, resumeData, suspend }) => {
     if (!resumeData) {
-      const phone = await getBrandPhone(inputData.brandId);
-
-      await sendText(
-        phone,
-        `Awesome — diving into @${inputData.igHandle} now. Give me a moment to study your feed and I'll come back with a brand kit you can tweak.`,
-      );
-
-      try {
-        const abby = getAbbyAgent();
-        const prompt = [
-          `[brandId=${inputData.brandId}]`,
-          `The user just confirmed their Instagram handle: @${inputData.igHandle}.`,
-          `Their brand profile has no brand kit yet. Delegate to onboardingAgent`,
-          `with this brandId and handle. When it returns, lightly reformat the recap`,
-          `into your warm WhatsApp voice and send it to the user, ending with`,
-          `"Want me to lock this in or tweak anything?"`,
-        ].join(' ');
-
-        const result = await abby.generate(prompt, {
-          memory: { thread: `brand:${inputData.brandId}`, resource: inputData.brandId },
-        });
-        const reply = (result as { text?: string }).text?.trim() ?? '';
-        if (reply) await sendText(phone, reply);
-      } catch (err) {
-        logger.error({ err, brandId: inputData.brandId }, 'Onboarding analysis failed');
-        await sendText(
-          phone,
-          "Hmm, I couldn't read that account. Make sure it's public and the handle is right? Reply with your handle (without the @) and I'll try again.",
-        );
-      }
-
-      await suspend({ question: 'brand_kit_confirmation' });
+      const mode = await presentBrandKitOrAskRetry(inputData.brandId, inputData.igHandle);
+      await suspend({ question: 'brand_kit_review', mode });
       return undefined as never;
     }
 
-    const lower = resumeData.reply.toLowerCase();
-    const wantsEdits =
-      /\b(edit|tweak|change|wrong|fix|update|nope|no\b|different|swap)\b/.test(lower);
+    const reply = resumeData.reply.trim();
+    const phone = await getBrandPhone(inputData.brandId);
+    const brand = await findBrandById(inputData.brandId);
+    if (!brand) throw new Error(`Brand ${inputData.brandId} not found`);
 
-    if (wantsEdits) {
-      const phone = await getBrandPhone(inputData.brandId);
+    // Branch 1: analysis previously failed → reply is a new handle to try.
+    if (!brand.brandKitJson) {
+      let newHandle: string;
       try {
-        const abby = getAbbyAgent();
-        const prompt = [
-          `[brandId=${inputData.brandId}]`,
-          `The user wants to edit the brand kit. Their feedback: "${resumeData.reply}".`,
-          `Update the brand profile via updateBrandProfile if needed and confirm the change in a short message.`,
-        ].join(' ');
-        const result = await abby.generate(prompt, {
-          memory: { thread: `brand:${inputData.brandId}`, resource: inputData.brandId },
-        });
-        const reply = (result as { text?: string }).text?.trim() ?? '';
-        if (reply) await sendText(phone, reply);
+        newHandle = normalizeIgHandle(reply);
       } catch (err) {
-        logger.error({ err, brandId: inputData.brandId }, 'Brand kit edit handling failed');
+        if (!(err instanceof InstagramScraperError)) throw err;
+        await sendText(phone, RETRY_HANDLE_PROMPT);
+        await suspend({ question: 'brand_kit_review', mode: 'retry_handle' });
+        return undefined as never;
       }
-      // Stay in this step — suspend again until user confirms.
-      await suspend({ question: 'brand_kit_confirmation' });
+      await updateBrand(inputData.brandId, { igHandle: newHandle });
+      const mode = await presentBrandKitOrAskRetry(inputData.brandId, newHandle);
+      await suspend({ question: 'brand_kit_review', mode });
       return undefined as never;
     }
 
-    return { brandId: inputData.brandId, confirmed: true };
+    // Branch 2: explicit approval → move on.
+    if (isExplicitApproval(reply)) {
+      return { brandId: inputData.brandId, confirmed: true };
+    }
+
+    // Branch 3: looks like a single handle token / IG URL → re-run analysis on it.
+    if (looksLikeHandle(reply)) {
+      let newHandle: string;
+      try {
+        newHandle = normalizeIgHandle(reply);
+      } catch {
+        // looksLikeHandle said yes but normalize said no — fall through to edits.
+        newHandle = '';
+      }
+      if (newHandle) {
+        await updateBrand(inputData.brandId, {
+          igHandle: newHandle,
+          brandKitJson: null,
+          designSystemJson: null,
+          voiceJson: null,
+          igAnalysisJson: null,
+        });
+        const mode = await presentBrandKitOrAskRetry(inputData.brandId, newHandle);
+        await suspend({ question: 'brand_kit_review', mode });
+        return undefined as never;
+      }
+    }
+
+    // Branch 4: free-form edit feedback → let Abby apply it.
+    try {
+      const abby = getAbbyAgent();
+      const prompt = [
+        `[brandId=${inputData.brandId}]`,
+        `The user reviewed the brand kit and wants to tweak something.`,
+        `Their feedback: "${reply}".`,
+        `Apply the change with updateBrandProfile if it maps to voice/cadence/timezone.`,
+        `Keep your reply short — confirm what changed in one sentence.`,
+      ].join(' ');
+      const result = await abby.generate(prompt, {
+        memory: { thread: `brand:${inputData.brandId}`, resource: inputData.brandId },
+      });
+      const text = (result as { text?: string }).text?.trim() ?? '';
+      if (text) await sendText(phone, text);
+    } catch (err) {
+      logger.error({ err, brandId: inputData.brandId }, 'Brand kit edit handling failed');
+      await sendText(phone, "Hit a snag applying that — mind rephrasing the change?");
+    }
+
+    const refreshed = await findBrandById(inputData.brandId);
+    if (refreshed) await sendText(phone, buildBrandKitRecap(refreshed));
+    await sendText(phone, REVIEW_PROMPT);
+    await suspend({ question: 'brand_kit_review', mode: 'reviewing' });
+    return undefined as never;
   },
 });
 
