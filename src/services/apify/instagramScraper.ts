@@ -146,10 +146,30 @@ export function normalizeIgHandle(input: string): string {
  *
  * Returns the normalized username, or `null` if nothing usable was found.
  */
+/**
+ * Common single-word replies that happen to match the IG username character
+ * set but are clearly NOT handles in conversation (acknowledgments,
+ * confusion, refusals, greetings). Prevents the whole-message normalize step
+ * from misreading "Yea" or "ok" as a handle. The LLM extractor catches a much
+ * wider net; this is just for the regex fallback path.
+ */
+const NON_HANDLE_WORDS = new Set([
+  'yes', 'yea', 'yeah', 'yep', 'yup', 'ok', 'okay', 'cool', 'sure', 'sweet',
+  'no', 'nope', 'nah', 'never',
+  'hi', 'hey', 'hello', 'sup', 'lol', 'haha', 'hmm', 'wat', 'what', 'huh',
+  'k', 'kk', 'thx', 'thanks', 'ty', 'np', 'ok', 'idk', 'tbh', 'fr', 'oof',
+  'maybe', 'later', 'skip', 'wait', 'stop', 'pause', 'go', 'now', 'soon',
+  'me', 'you', 'us', 'them', 'this', 'that', 'these', 'those',
+]);
+
 export function extractHandleFromMessage(input: string): string | null {
   if (typeof input !== 'string') return null;
   const trimmed = input.trim();
   if (!trimmed) return null;
+
+  if (NON_HANDLE_WORDS.has(trimmed.toLowerCase())) {
+    return null;
+  }
 
   try {
     return normalizeIgHandle(trimmed);

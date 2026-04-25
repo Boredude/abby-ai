@@ -7,9 +7,9 @@ import { getDuffyAgent } from '../agents/duffy.js';
 import { analyzeBrand } from '../../services/onboarding/analyzeBrand.js';
 import {
   InstagramScraperError,
-  extractHandleFromMessage,
   normalizeIgHandle,
 } from '../../services/apify/instagramScraper.js';
+import { extractHandleWithLLM } from '../../services/onboarding/extractHandle.js';
 import {
   REVIEW_PROMPT,
   RETRY_HANDLE_PROMPT,
@@ -116,11 +116,13 @@ const askIgHandle = createStep({
       await suspend({ question: 'ig_handle' });
       return undefined as never;
     }
-    // Tolerant extraction first — accepts "@ob.cocktails", "Oh got it.
-    // @ob.cocktails", "my handle is instagram.com/ob.cocktails" etc. Only if
-    // we can't find a handle anywhere in the reply do we treat it as
-    // off-script.
-    const extracted = extractHandleFromMessage(resumeData.reply);
+    // LLM-driven extraction. Handles "@ob.cocktails", "It's ob.cocktails",
+    // "my handle is instagram.com/ob.cocktails", and crucially knows that
+    // "Yea" / "ok" / "what?" are NOT handles — even when they technically
+    // match the username character set. Falls back to a regex extractor on
+    // LLM failure (see extractHandleWithLLM). Only if nothing extracts do we
+    // treat the reply as off-script.
+    const extracted = await extractHandleWithLLM(resumeData.reply);
     if (extracted) {
       await updateBrand(inputData.brandId, { igHandle: extracted });
       return { brandId: inputData.brandId, igHandle: extracted };
@@ -251,7 +253,7 @@ const runAnalysisAndConfirm = createStep({
         await suspend({ question: 'brand_kit_review', mode });
         return undefined as never;
       }
-      const newHandle = extractHandleFromMessage(reply);
+      const newHandle = await extractHandleWithLLM(reply);
       if (!newHandle) {
         await sendText(
           phone,
