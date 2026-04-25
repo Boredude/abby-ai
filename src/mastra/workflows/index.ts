@@ -6,4 +6,4 @@ export const workflows = {
   postDraftApproval: postDraftApprovalWorkflow,
 } as const;
 
-export type AbbyWorkflowId = keyof typeof workflows;
+export type DuffyWorkflowId = keyof typeof workflows;

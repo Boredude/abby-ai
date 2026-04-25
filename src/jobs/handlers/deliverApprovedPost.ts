@@ -12,7 +12,7 @@ export type DeliverApprovedPostPayload = {
  * pg-boss handler: at the scheduled time, send the approved post (caption +
  * image) back to the brand on WhatsApp so they can publish it manually.
  *
- * MVP scope: Abby does NOT post to Instagram herself yet — she just delivers
+ * MVP scope: Duffy does NOT post to Instagram herself yet — she just delivers
  * the asset to the brand owner.
  */
 export async function handleDeliverApprovedPost(payload: DeliverApprovedPostPayload): Promise<void> {

@@ -10,7 +10,7 @@ import {
 } from '../tools/instagram/index.js';
 
 const ONBOARDING_INSTRUCTIONS = `
-You are the OnboardingAgent — a brand discovery specialist working on behalf of Abby.
+You are the OnboardingAgent — a brand discovery specialist working on behalf of Duffy.
 Given a brand's Instagram handle and brandId, you autonomously:
 
   1. Call \`fetchInstagramProfile\` with the handle to pull profile metadata + the most recent posts.
@@ -52,7 +52,7 @@ export function getOnboardingAgent(): Agent {
     id: 'onboardingAgent',
     name: 'OnboardingAgent',
     description:
-      "Analyzes a brand's Instagram (visuals + captions via Apify) and produces a brand kit, design system, and voice guide. Used by Abby during initial onboarding.",
+      "Analyzes a brand's Instagram (visuals + captions via Apify) and produces a brand kit, design system, and voice guide. Used by Duffy during initial onboarding.",
     instructions: ONBOARDING_INSTRUCTIONS,
     model: env.ONBOARDING_AGENT_MODEL,
     memory: getOnboardingMemory(),

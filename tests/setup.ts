@@ -16,14 +16,14 @@ const STUBS: Record<string, string> = {
   OPENAI_TEXT_MODEL: 'gpt-4.1',
   OPENAI_IMAGE_MODEL: 'gpt-image-2',
   ANTHROPIC_API_KEY: 'sk-ant-test',
-  ABBY_ORCHESTRATOR_MODEL: 'anthropic/claude-haiku-4-5',
+  DUFFY_ORCHESTRATOR_MODEL: 'anthropic/claude-haiku-4-5',
   ONBOARDING_AGENT_MODEL: 'anthropic/claude-sonnet-4-5',
   APIFY_TOKEN: 'apify_api_test',
   R2_ACCOUNT_ID: 'test-account',
   R2_ACCESS_KEY_ID: 'test-key',
   R2_SECRET_ACCESS_KEY: 'test-secret',
-  R2_BUCKET: 'abby-test',
-  R2_PUBLIC_BASE_URL: 'https://abby-test.r2.dev',
+  R2_BUCKET: 'duffy-test',
+  R2_PUBLIC_BASE_URL: 'https://duffy-test.r2.dev',
 };
 
 for (const [key, value] of Object.entries(STUBS)) {

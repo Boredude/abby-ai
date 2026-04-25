@@ -25,7 +25,7 @@ describe('decodeButtonId', () => {
 describe('parseKapsoEvent', () => {
   it('parses a text message (flat Kapso payload)', () => {
     const event: KapsoMessageReceivedEvent = {
-      message: { id: 'wamid.1', from: '15551234567', type: 'text', text: { body: 'hi abby' } },
+      message: { id: 'wamid.1', from: '15551234567', type: 'text', text: { body: 'hi duffy' } },
       conversation: { id: 'conv-1', contact_name: 'Tester' },
     };
     expect(parseKapsoEvent(event)).toEqual({
@@ -34,7 +34,7 @@ describe('parseKapsoEvent', () => {
       contactName: 'Tester',
       conversationId: 'conv-1',
       kind: 'text',
-      text: 'hi abby',
+      text: 'hi duffy',
     });
   });
 

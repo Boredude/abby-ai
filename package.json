@@ -1,8 +1,8 @@
 {
-  "name": "abby-ai",
+  "name": "duffy-ai",
   "version": "0.0.1",
   "private": true,
-  "description": "Abby — autonomous Instagram content agent on Mastra, talking to brands via WhatsApp through Kapso.",
+  "description": "Duffy — autonomous Instagram content agent on Mastra, talking to brands via WhatsApp through Kapso.",
   "type": "module",
   "engines": {
     "node": ">=22"

@@ -1,17 +1,17 @@
-# Abby — Autonomous Instagram Content Agent
+# Duffy — Autonomous Instagram Content Agent
 
-Abby is a Mastra-powered AI agent that plans, drafts, and ships Instagram content for brands — entirely over WhatsApp. No dashboards, no logins. The brand owner chats with Abby like they would with a content manager. Abby analyzes the brand, generates posts (caption + AI image), gets approval via interactive WhatsApp buttons, and at the scheduled time delivers the final asset back for the brand to post.
+Duffy is a Mastra-powered AI agent that plans, drafts, and ships Instagram content for brands — entirely over WhatsApp. No dashboards, no logins. The brand owner chats with Duffy like they would with a content manager. Duffy analyzes the brand, generates posts (caption + AI image), gets approval via interactive WhatsApp buttons, and at the scheduled time delivers the final asset back for the brand to post.
 
-> **MVP scope:** Abby produces approved posts and DMs them back to the brand on WhatsApp for manual posting. Direct publishing to Instagram is intentionally out of scope for v1.
+> **MVP scope:** Duffy produces approved posts and DMs them back to the brand on WhatsApp for manual posting. Direct publishing to Instagram is intentionally out of scope for v1.
 
 ---
 
-## Try Abby
+## Try Duffy
 
-Scan the QR with your phone to start a WhatsApp conversation with Abby and walk through onboarding.
+Scan the QR with your phone to start a WhatsApp conversation with Duffy and walk through onboarding.
 
 <p align="center">
-  <img src="docs/abby-qr.png" alt="Scan to message Abby on WhatsApp" width="240" />
+  <img src="docs/duffy-qr.png" alt="Scan to message Duffy on WhatsApp" width="240" />
 </p>
 
 When you message her she'll ask for your Instagram handle, brand description, posting cadence, and timezone. From there she takes over.
@@ -25,7 +25,7 @@ WhatsApp ──▶ Kapso ──▶ /webhooks/kapso ──▶ inboundDispatcher
                                               │
                        ┌──────────────────────┼──────────────────────┐
                        ▼                      ▼                      ▼
-              brandOnboarding (WF)   postDraftApproval (WF)   abby agent (chat)
+              brandOnboarding (WF)   postDraftApproval (WF)   duffy agent (chat)
                        │                      │
                        ▼                      ▼
                  brands table          post_drafts table
@@ -101,7 +101,7 @@ OPENAI_API_KEY=sk-...
 R2_ACCOUNT_ID=...
 R2_ACCESS_KEY_ID=...
 R2_SECRET_ACCESS_KEY=...
-R2_BUCKET=abby-ai-mvp
+R2_BUCKET=duffy-ai-mvp
 R2_PUBLIC_BASE_URL=https://pub-<hash>.r2.dev
 ```
 
@@ -131,7 +131,7 @@ src/
     inboundDispatcher.ts
     workflowRunner.ts
   mastra/
-    agents/        Abby agent (system prompt + tools)
+    agents/        Duffy agent (system prompt + tools)
     tools/         getBrandProfile, updateBrandProfile, generateImage
     workflows/     brandOnboarding, postDraftApproval
     index.ts       Mastra instance

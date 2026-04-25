@@ -60,8 +60,8 @@ vi.mock('../../src/services/workflowRunner.js', () => ({
   resumeWorkflow: mocks.resumeWorkflow,
 }));
 
-vi.mock('../../src/mastra/agents/abby.js', () => ({
-  getAbbyAgent: () => ({ generate: mocks.agentGenerate }),
+vi.mock('../../src/mastra/agents/duffy.js', () => ({
+  getDuffyAgent: () => ({ generate: mocks.agentGenerate }),
 }));
 
 import { dispatchInboundMessage } from '../../src/services/inboundDispatcher.js';
@@ -170,7 +170,7 @@ describe('dispatchInboundMessage → slash commands', () => {
 
     await dispatchInboundMessage({
       kind: 'text',
-      text: 'hi abby',
+      text: 'hi duffy',
       waMessageId: 'm-5',
       fromPhone: '15558889999',
     });

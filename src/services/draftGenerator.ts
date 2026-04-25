@@ -19,7 +19,7 @@ export type GeneratedDraft = {
 };
 
 const SYSTEM_PROMPT = `
-You are Abby, an Instagram content strategist. You produce a single Instagram post — a
+You are Duffy, an Instagram content strategist. You produce a single Instagram post — a
 caption and an image-generation prompt — that fits the brand's voice. Output strict JSON
 with this schema:
 

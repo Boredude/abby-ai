@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { logger } from '../config/logger.js';
 import { markRunStatus, markSuspended, recordRun } from '../db/repositories/workflowRuns.js';
 import { getMastra } from '../mastra/index.js';
-import type { AbbyWorkflowId } from '../mastra/workflows/index.js';
+import type { DuffyWorkflowId } from '../mastra/workflows/index.js';
 
 type WorkflowResultLike = {
   status: 'success' | 'suspended' | 'failed' | string;
@@ -18,7 +18,7 @@ async function reflectResult(args: {
   runId: string;
   brandId: string;
   draftId?: string;
-  workflowId: AbbyWorkflowId;
+  workflowId: DuffyWorkflowId;
   result: WorkflowResultLike;
   isFirstStart: boolean;
 }): Promise<void> {
@@ -51,7 +51,7 @@ async function reflectResult(args: {
 }
 
 export async function startWorkflow<TInput extends Record<string, unknown>>(args: {
-  workflowId: AbbyWorkflowId;
+  workflowId: DuffyWorkflowId;
   brandId: string;
   draftId?: string;
   inputData: TInput;
@@ -77,7 +77,7 @@ export async function startWorkflow<TInput extends Record<string, unknown>>(args
 }
 
 export async function resumeWorkflow(args: {
-  workflowId: AbbyWorkflowId;
+  workflowId: DuffyWorkflowId;
   runId: string;
   brandId: string;
   draftId?: string;

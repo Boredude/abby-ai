@@ -7,11 +7,19 @@ import { getBrandProfileTool } from '../tools/getBrandProfile.js';
 import { updateBrandProfileTool } from '../tools/updateBrandProfile.js';
 import { getOnboardingAgent } from './onboarding.js';
 
-const ABBY_INSTRUCTIONS = `
-You are Abby — an autonomous Instagram content strategist and personal brand assistant.
-You speak with brand owners exclusively over WhatsApp, so your voice is warm, concise, and
-human. You write the way a sharp colleague would text — short paragraphs, occasional
-bullet lists, no corporate jargon.
+const DUFFY_INSTRUCTIONS = `
+You are Duffy — an autonomous Instagram content strategist and personal brand assistant.
+You speak with brand owners exclusively over WhatsApp.
+
+VOICE:
+- Gen-Z, fun, sharp. Like a friend who happens to be a great content strategist.
+  Never cringe, never corporate, never hype-bro, no "let's gooo".
+- Warm and concise. Mostly lowercase is fine. Light, occasional emoji is ok;
+  no emoji spam, never more than one per message.
+- Vary phrasing — never sound like you're reading from a script. Read the moment.
+- WhatsApp-native: short paragraphs, occasional bullet lists, no corporate jargon.
+- Sound smart. If the user asks something off-topic, actually engage with it
+  briefly before steering back — don't ignore the question.
 
 You run on a small, fast model. Stay lean: lean on tools and sub-agents instead of
 producing long internal monologues.
@@ -54,31 +62,31 @@ You will receive the current brand id in your memory thread context. Use it when
 tools that require \`brandId\`, and when delegating to \`onboardingAgent\`.
 `.trim();
 
-let abbyMemory: Memory | null = null;
-let abbyAgent: Agent | null = null;
+let duffyMemory: Memory | null = null;
+let duffyAgent: Agent | null = null;
 
-function getAbbyMemory(): Memory {
-  if (abbyMemory) return abbyMemory;
+function getDuffyMemory(): Memory {
+  if (duffyMemory) return duffyMemory;
   const env = loadEnv();
   const storage = new PostgresStore({
-    id: 'abby-memory-storage',
+    id: 'duffy-memory-storage',
     connectionString: env.DATABASE_URL,
   });
-  abbyMemory = new Memory({ storage });
-  return abbyMemory;
+  duffyMemory = new Memory({ storage });
+  return duffyMemory;
 }
 
-export function getAbbyAgent(): Agent {
-  if (abbyAgent) return abbyAgent;
+export function getDuffyAgent(): Agent {
+  if (duffyAgent) return duffyAgent;
   const env = loadEnv();
-  abbyAgent = new Agent({
-    id: 'abby',
-    name: 'Abby',
+  duffyAgent = new Agent({
+    id: 'duffy',
+    name: 'Duffy',
     description:
       'Autonomous Instagram content strategist that talks to brand owners on WhatsApp. Supervises specialized sub-agents (onboardingAgent) for deep tasks.',
-    instructions: ABBY_INSTRUCTIONS,
-    model: env.ABBY_ORCHESTRATOR_MODEL,
-    memory: getAbbyMemory(),
+    instructions: DUFFY_INSTRUCTIONS,
+    model: env.DUFFY_ORCHESTRATOR_MODEL,
+    memory: getDuffyMemory(),
     tools: {
       getBrandProfile: getBrandProfileTool,
       updateBrandProfile: updateBrandProfileTool,
@@ -88,5 +96,5 @@ export function getAbbyAgent(): Agent {
       onboardingAgent: getOnboardingAgent(),
     },
   });
-  return abbyAgent;
+  return duffyAgent;
 }

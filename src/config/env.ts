@@ -19,7 +19,7 @@ const schema = z.object({
   OPENAI_IMAGE_MODEL: z.string().default('gpt-image-2'),
 
   ANTHROPIC_API_KEY: z.string().min(1, 'ANTHROPIC_API_KEY is required'),
-  ABBY_ORCHESTRATOR_MODEL: z.string().default('anthropic/claude-haiku-4-5'),
+  DUFFY_ORCHESTRATOR_MODEL: z.string().default('anthropic/claude-haiku-4-5'),
   ONBOARDING_AGENT_MODEL: z.string().default('anthropic/claude-sonnet-4-5'),
 
   APIFY_TOKEN: z.string().min(1, 'APIFY_TOKEN is required'),

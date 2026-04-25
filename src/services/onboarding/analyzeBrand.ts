@@ -61,7 +61,7 @@ function classifyAnalyzerError(err: unknown): 'service_unavailable' | 'unknown' 
  * loop) and persist the result to the brand row. Returns a structured
  * outcome the workflow can branch on.
  *
- * We invoke the services synchronously rather than going through Abby /
+ * We invoke the services synchronously rather than going through Duffy /
  * OnboardingAgent because small chat models have proven unreliable at
  * actually calling the scrape tool — running it as code is deterministic.
  */

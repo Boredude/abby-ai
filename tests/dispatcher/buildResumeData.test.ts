@@ -48,8 +48,8 @@ vi.mock('../../src/services/kapso/client.js', () => ({
   sendText: mocks.sendText,
 }));
 
-vi.mock('../../src/mastra/agents/abby.js', () => ({
-  getAbbyAgent: () => ({ generate: mocks.agentGenerate }),
+vi.mock('../../src/mastra/agents/duffy.js', () => ({
+  getDuffyAgent: () => ({ generate: mocks.agentGenerate }),
 }));
 
 import { dispatchInboundMessage } from '../../src/services/inboundDispatcher.js';
