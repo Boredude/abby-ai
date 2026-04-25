@@ -5,12 +5,17 @@ import { loadEnv } from '../../config/env.js';
 import { logger } from '../../config/logger.js';
 
 /**
- * Visual analysis of an Instagram brand. We feed up to 9 post image URLs in a
- * single multi-image vision call and ask Claude Sonnet to extract a brand kit
- * (color palette, typography mood) plus a design system summary.
+ * Visual analysis of an Instagram brand. We feed every post image we have for
+ * the IG grid (typically 12 — Apify's `details` mode returns the most recent
+ * 12 posts) into a single multi-image vision call and ask Claude Sonnet to
+ * extract a brand kit (color palette, typography mood) plus a design system
+ * summary.
+ *
+ * The hard cap exists only as a defensive guard against accidental input
+ * blow-ups; in practice the scraper returns ~12.
  */
 
-const MAX_IMAGES = 9;
+const MAX_IMAGES = 24;
 
 const paletteEntrySchema = z.object({
   hex: z
@@ -28,24 +33,31 @@ const paletteEntrySchema = z.object({
     .describe('Optional human-friendly name (e.g. "warm sand", "deep navy").'),
 });
 
+// NOTE: Anthropic's structured-output mode rejects `minItems`/`maxItems` > 1,
+// so we keep array sizes free in the schema and steer counts via descriptions
+// + the prompt instead.
 const visualAnalysisSchema = z.object({
   palette: z
     .array(paletteEntrySchema)
-    .min(3)
-    .max(7)
     .describe('3 to 7 dominant colors that define the brand on Instagram.'),
   typographyMood: z
     .string()
-    .min(10)
-    .max(200)
-    .describe('Short description of the typographic feel (serif/sans, weight, tone).'),
-  photoStyle: z.string().min(10).max(300),
-  illustrationStyle: z.string().min(0).max(300),
-  composition: z.string().min(10).max(300),
-  lighting: z.string().min(10).max(300),
-  recurringMotifs: z.array(z.string().min(2).max(60)).min(0).max(8),
-  doVisuals: z.array(z.string().min(2).max(120)).min(2).max(8),
-  dontVisuals: z.array(z.string().min(2).max(120)).min(2).max(8),
+    .describe('Short description of the typographic feel (serif/sans, weight, tone), 10–200 chars.'),
+  photoStyle: z.string().describe('Photo style description, 10–300 chars.'),
+  illustrationStyle: z
+    .string()
+    .describe('Illustration/graphic style description; empty string if none, otherwise up to 300 chars.'),
+  composition: z.string().describe('Composition style description, 10–300 chars.'),
+  lighting: z.string().describe('Lighting style description, 10–300 chars.'),
+  recurringMotifs: z
+    .array(z.string())
+    .describe('Up to 8 recurring motifs/objects/themes (2–60 chars each); empty if none.'),
+  doVisuals: z
+    .array(z.string())
+    .describe('2 to 8 short do-this guidelines for visuals (2–120 chars each).'),
+  dontVisuals: z
+    .array(z.string())
+    .describe("2 to 8 short avoid-this guidelines for visuals (2–120 chars each)."),
 });
 
 export type VisualAnalysis = z.infer<typeof visualAnalysisSchema>;
