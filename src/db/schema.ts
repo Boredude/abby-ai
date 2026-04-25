@@ -47,6 +47,7 @@ export const brands = pgTable(
     brandKitJson: jsonb('brand_kit_json').$type<BrandKit | null>().default(null),
     designSystemJson: jsonb('design_system_json').$type<BrandDesignSystem | null>().default(null),
     igAnalysisJson: jsonb('ig_analysis_json').$type<IgAnalysisSnapshot | null>().default(null),
+    brandBoardImageUrl: text('brand_board_image_url'),
     timezone: text('timezone').default('UTC').notNull(),
     status: brandStatusEnum('status').default('pending').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

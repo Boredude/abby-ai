@@ -1,0 +1,1 @@
+ALTER TABLE "brands" ADD COLUMN "brand_board_image_url" text;

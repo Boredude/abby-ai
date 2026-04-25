@@ -1,7 +1,7 @@
 import { createStep, createWorkflow } from '@mastra/core/workflows';
 import { z } from 'zod';
 import { findBrandById, updateBrand } from '../../db/repositories/brands.js';
-import { sendText } from '../../services/kapso/client.js';
+import { sendImage, sendText } from '../../services/kapso/client.js';
 import { logger } from '../../config/logger.js';
 import { getAbbyAgent } from '../agents/abby.js';
 import { analyzeBrand } from '../../services/onboarding/analyzeBrand.js';
@@ -16,7 +16,11 @@ import {
   isExplicitApproval,
   looksLikeHandle,
 } from '../../services/onboarding/recap.js';
-import type { BrandCadence } from '../../db/schema.js';
+import {
+  buildBrandBoardCaption,
+  generateBrandBoard,
+} from '../../services/onboarding/brandBoardImage.js';
+import type { Brand, BrandCadence } from '../../db/schema.js';
 
 /**
  * Brand onboarding workflow (v3 — analyze + review).
@@ -46,6 +50,32 @@ async function getBrandPhone(brandId: string): Promise<string> {
   const brand = await findBrandById(brandId);
   if (!brand) throw new Error(`Brand ${brandId} not found`);
   return brand.waPhone;
+}
+
+/**
+ * Send the brand kit to the user as a generated brand-board image with a
+ * short caption. If image generation fails for any reason we fall back to
+ * the structured text recap so the workflow never gets stuck.
+ *
+ * `force` is passed through to `generateBrandBoard` — set true on the
+ * post-edit re-send path so we always regenerate after the kit changed.
+ */
+async function presentBrandKitToUser(
+  brand: Brand,
+  phone: string,
+  opts: { force?: boolean } = {},
+): Promise<void> {
+  try {
+    const { url } = await generateBrandBoard(brand, opts);
+    await sendImage(phone, url, buildBrandBoardCaption(brand));
+  } catch (err) {
+    logger.error(
+      { err, brandId: brand.id },
+      'Brand board image generation failed; falling back to text recap',
+    );
+    await sendText(phone, buildBrandKitRecap(brand));
+  }
+  await sendText(phone, REVIEW_PROMPT);
 }
 
 const askIgHandle = createStep({
@@ -120,8 +150,7 @@ async function presentBrandKitOrAskRetry(
 
   const brand = await findBrandById(brandId);
   if (!brand) throw new Error(`Brand ${brandId} not found`);
-  await sendText(phone, buildBrandKitRecap(brand));
-  await sendText(phone, REVIEW_PROMPT);
+  await presentBrandKitToUser(brand, phone);
   return 'reviewing';
 }
 
@@ -221,8 +250,11 @@ const runAnalysisAndConfirm = createStep({
     }
 
     const refreshed = await findBrandById(inputData.brandId);
-    if (refreshed) await sendText(phone, buildBrandKitRecap(refreshed));
-    await sendText(phone, REVIEW_PROMPT);
+    if (refreshed) {
+      await presentBrandKitToUser(refreshed, phone, { force: true });
+    } else {
+      await sendText(phone, REVIEW_PROMPT);
+    }
     await suspend({ question: 'brand_kit_review', mode: 'reviewing' });
     return undefined as never;
   },

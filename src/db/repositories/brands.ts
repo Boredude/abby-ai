@@ -53,6 +53,7 @@ export async function updateBrand(
     brandKitJson: BrandKit | null;
     designSystemJson: BrandDesignSystem | null;
     igAnalysisJson: IgAnalysisSnapshot | null;
+    brandBoardImageUrl: string | null;
     timezone: string;
     status: Brand['status'];
   }>,
