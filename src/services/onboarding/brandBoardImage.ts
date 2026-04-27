@@ -77,12 +77,14 @@ export function buildBrandBoardPrompt(brand: Brand): string {
 }
 
 /**
- * Short caption sent on WhatsApp alongside the brand-board image. Keeps the
- * approval prompt itself in `REVIEW_PROMPT` (sent as a separate text message).
+ * Short caption sent on WhatsApp alongside the brand-board image. Purely
+ * descriptive — the actual review question (lock in / tweak / try a different
+ * handle) is the next message (`REVIEW_PROMPT`). Keeping the caption neutral
+ * avoids two back-to-back asks that read as redundant.
  */
 export function buildBrandBoardCaption(brand: Brand): string {
   const handle = brand.igHandle ?? 'your brand';
-  return `Here's how I'm seeing @${handle} — does this feel right?`;
+  return `Here's how I'm reading @${handle}.`;
 }
 
 /**

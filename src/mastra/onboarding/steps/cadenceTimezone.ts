@@ -1,7 +1,7 @@
 import { logger } from '../../../config/logger.js';
 import { findBrandById, updateBrand } from '../../../db/repositories/brands.js';
 import type { BrandCadence } from '../../../db/schema.js';
-import { sayInDuffyVoice } from '../../../services/onboarding/voice.js';
+import { phraseAsDuffy } from '../../agents/voice.js';
 import type { OnboardingStep, OnboardingStepContext, OnboardingStepResult } from '../types.js';
 
 /**
@@ -19,11 +19,13 @@ async function executeCadenceTimezone(
 
   if (!resumeData) {
     await channel.sendText(
-      await sayInDuffyVoice({
-        intent: 'cadence_timezone_question',
+      await phraseAsDuffy({
+        goal: "After the brand kit is locked in. Ask one combined question for posting cadence and timezone. Give tiny examples.",
+        mustConvey:
+          'Ask how often they want to post (example: "3 a week, mornings") AND their timezone (example: America/New_York). One combined ask.',
         brandId,
         fallback:
-          'Locked in. Two quick last things and we\'re set: how often do you want to post (e.g. "3 a week, mornings") and what\'s your timezone (e.g. America/New_York)?',
+          'Locked in. Two quick last things and I\'m set: how often do you want to post (e.g. "3 a week, mornings") and what\'s your timezone (e.g. America/New_York)?',
       }),
     );
     ctx.suspend({ question: 'cadence_and_timezone' });
@@ -48,8 +50,10 @@ async function executeCadenceTimezone(
     `I'll start drafting posts and check in with you over the week. Reply any time if you want to brainstorm something.`,
   ].join('\n');
   await channel.sendText(
-    await sayInDuffyVoice({
-      intent: 'onboarding_complete_summary',
+    await phraseAsDuffy({
+      goal: "Final onboarding message. Confirm everything is set, recap their IG handle, posts/week, and timezone (all in context), then say you'll start drafting and check in over the week.",
+      mustConvey:
+        "Onboarding is done. Recap igHandle, postsPerWeek, and timezone from context. Mention you'll start drafting and check in.",
       brandId: brand.id,
       context: {
         igHandle: brand.igHandle,
@@ -57,6 +61,7 @@ async function executeCadenceTimezone(
         timezone,
       },
       fallback: fallbackSummary,
+      maxChars: 500,
     }),
   );
   logger.info({ brandId: brand.id }, 'Brand onboarding complete');
