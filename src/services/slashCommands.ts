@@ -6,7 +6,7 @@ import { resetBrandByChannel } from './admin/resetBrandState.js';
 
 const HELP_LINES = [
   'Commands you can send me:',
-  '/reset — wipe my memory and your brand profile, start fresh',
+  '/reset — wipe everything (memory, brand profile, brand kit, scheduled posts) and start over',
   '/help — show this list',
 ];
 
@@ -63,7 +63,7 @@ export async function handleSlashCommand(
         const total = Object.values(summary.rowsDeleted).reduce((acc, n) => acc + n, 0);
         log.info({ summary }, 'Slash command: /reset complete');
         await channel.sendText(
-          `Slate wiped (${total} rows). I won't remember anything from before. Send me a message to start onboarding fresh.`,
+          `Slate wiped (${total} rows) — memory, brand profile, brand kit, scheduled posts, all gone. Send me a message to start onboarding from scratch.`,
         );
       } catch (err) {
         log.error({ err }, 'Slash command: /reset failed');
