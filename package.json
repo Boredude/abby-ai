@@ -18,7 +18,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:studio": "drizzle-kit studio",
-    "reset-brand": "tsx src/scripts/resetBrand.ts"
+    "reset-brand": "tsx src/scripts/resetBrand.ts",
+    "deploy": "railway up"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.71",
