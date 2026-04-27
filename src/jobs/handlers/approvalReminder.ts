@@ -1,7 +1,6 @@
+import { getBrandChannel } from '../../channels/registry.js';
 import { logger } from '../../config/logger.js';
-import { findBrandById } from '../../db/repositories/brands.js';
 import { listStalePendingApprovals } from '../../db/repositories/postDrafts.js';
-import { sendButtons } from '../../services/kapso/client.js';
 
 const STALE_HOURS = 24;
 
@@ -9,9 +8,9 @@ const STALE_HOURS = 24;
  * Approval reminder cron.
  *
  * Finds drafts that have been sitting in `pending_approval` for >24h and
- * sends a polite nudge to the brand. Re-uses the same approve/edit/reject
- * button payloads so the existing dispatcher → workflow.resume path still
- * works.
+ * sends a polite nudge to the brand on their primary channel. Re-uses the
+ * same approve/edit/reject button payloads so the existing dispatcher →
+ * workflow.resume path still works.
  */
 export async function handleApprovalReminder(): Promise<void> {
   const stale = await listStalePendingApprovals(STALE_HOURS);
@@ -23,17 +22,24 @@ export async function handleApprovalReminder(): Promise<void> {
 
   for (const draft of stale) {
     try {
-      const brand = await findBrandById(draft.brandId);
-      if (!brand) continue;
-      await sendButtons({
-        to: brand.waPhone,
-        bodyText:
-          `Quick nudge — I have a post draft waiting on your nod. Want me to ship it as-is, tweak it, or scrap it?`,
+      const channel = await getBrandChannel(draft.brandId);
+      if (!channel) {
+        logger.warn({ draftId: draft.id, brandId: draft.brandId }, 'approvalReminder: no channel for brand');
+        continue;
+      }
+      if (!channel.capabilities.supportsButtons) {
+        await channel.sendText(
+          `Quick nudge — I have a post draft waiting on your nod. Reply 'approve', 'edit', or 'reject' (draft id ${draft.id}).`,
+        );
+        continue;
+      }
+      await channel.sendButtons({
+        bodyText: `Quick nudge — I have a post draft waiting on your nod. Want me to ship it as-is, tweak it, or scrap it?`,
         footer: `Draft from ${draft.createdAt.toLocaleDateString('en-US')}`,
         buttons: [
-          { type: 'reply', reply: { id: `approve_${draft.id}`, title: 'Approve' } },
-          { type: 'reply', reply: { id: `edit_${draft.id}`, title: 'Edit' } },
-          { type: 'reply', reply: { id: `reject_${draft.id}`, title: 'Reject' } },
+          { id: `approve_${draft.id}`, title: 'Approve' },
+          { id: `edit_${draft.id}`, title: 'Edit' },
+          { id: `reject_${draft.id}`, title: 'Reject' },
         ],
       });
     } catch (err) {

@@ -1,7 +1,6 @@
 import { Agent } from '@mastra/core/agent';
-import { Memory } from '@mastra/memory';
-import { PostgresStore } from '@mastra/pg';
 import { loadEnv } from '../../config/env.js';
+import { getSharedMemory } from '../memory.js';
 import {
   analyzeInstagramVisualsTool,
   analyzeInstagramVoiceTool,
@@ -31,19 +30,7 @@ RULES:
 - If any step fails, return "Onboarding failed: <reason>".
 `.trim();
 
-let onboardingMemory: Memory | null = null;
 let onboardingAgent: Agent | null = null;
-
-function getOnboardingMemory(): Memory {
-  if (onboardingMemory) return onboardingMemory;
-  const env = loadEnv();
-  const storage = new PostgresStore({
-    id: 'onboarding-memory-storage',
-    connectionString: env.DATABASE_URL,
-  });
-  onboardingMemory = new Memory({ storage });
-  return onboardingMemory;
-}
 
 export function getOnboardingAgent(): Agent {
   if (onboardingAgent) return onboardingAgent;
@@ -55,7 +42,7 @@ export function getOnboardingAgent(): Agent {
       "Analyzes a brand's Instagram (visuals + captions via Apify) and produces a brand kit, design system, and voice guide. Used by Duffy during initial onboarding.",
     instructions: ONBOARDING_INSTRUCTIONS,
     model: env.ONBOARDING_AGENT_MODEL,
-    memory: getOnboardingMemory(),
+    memory: getSharedMemory(),
     tools: {
       fetchInstagramProfile: fetchInstagramProfileTool,
       analyzeInstagramVisuals: analyzeInstagramVisualsTool,

@@ -5,6 +5,7 @@ import {
   uuid,
   timestamp,
   jsonb,
+  boolean,
   uniqueIndex,
   index,
 } from 'drizzle-orm/pg-core';
@@ -36,25 +37,68 @@ export const workflowRunStatusEnum = pgEnum('workflow_run_status', [
   'failed',
 ]);
 
-export const brands = pgTable(
-  'brands',
+/**
+ * The kinds of channels through which a brand owner can talk to Duffy.
+ * v1 only ships WhatsApp; the other values are placeholders so the column
+ * type doesn't need a migration when we add SMS/Telegram/etc.
+ *
+ * `instagram`/`tiktok` are reserved for the future case where a brand connects
+ * one of those as an owner-facing channel — distinct from "Duffy posts to it",
+ * which is content-direction and lives elsewhere.
+ */
+export const channelKindEnum = pgEnum('channel_kind', [
+  'whatsapp',
+  'sms',
+  'telegram',
+  'instagram',
+  'tiktok',
+]);
+
+export const brandChannelStatusEnum = pgEnum('brand_channel_status', [
+  'connected',
+  'pending',
+  'revoked',
+]);
+
+export const brands = pgTable('brands', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  igHandle: text('ig_handle'),
+  voiceJson: jsonb('voice_json').$type<BrandVoice | null>().default(null),
+  cadenceJson: jsonb('cadence_json').$type<BrandCadence | null>().default(null),
+  brandKitJson: jsonb('brand_kit_json').$type<BrandKit | null>().default(null),
+  designSystemJson: jsonb('design_system_json').$type<BrandDesignSystem | null>().default(null),
+  igAnalysisJson: jsonb('ig_analysis_json').$type<IgAnalysisSnapshot | null>().default(null),
+  brandBoardImageUrl: text('brand_board_image_url'),
+  timezone: text('timezone').default('UTC').notNull(),
+  status: brandStatusEnum('status').default('pending').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+/**
+ * A brand can be reached on multiple channels (WhatsApp today; SMS, Telegram,
+ * etc. later). `(kind, externalId)` is unique globally — that's how an
+ * inbound webhook resolves which brand a message is from. `isPrimary` marks
+ * the default outbound channel used when nothing else is specified.
+ */
+export const brandChannels = pgTable(
+  'brand_channels',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    waPhone: text('wa_phone').notNull(),
-    igHandle: text('ig_handle'),
-    voiceJson: jsonb('voice_json').$type<BrandVoice | null>().default(null),
-    cadenceJson: jsonb('cadence_json').$type<BrandCadence | null>().default(null),
-    brandKitJson: jsonb('brand_kit_json').$type<BrandKit | null>().default(null),
-    designSystemJson: jsonb('design_system_json').$type<BrandDesignSystem | null>().default(null),
-    igAnalysisJson: jsonb('ig_analysis_json').$type<IgAnalysisSnapshot | null>().default(null),
-    brandBoardImageUrl: text('brand_board_image_url'),
-    timezone: text('timezone').default('UTC').notNull(),
-    status: brandStatusEnum('status').default('pending').notNull(),
+    brandId: uuid('brand_id')
+      .notNull()
+      .references(() => brands.id, { onDelete: 'cascade' }),
+    kind: channelKindEnum('kind').notNull(),
+    externalId: text('external_id').notNull(),
+    isPrimary: boolean('is_primary').default(false).notNull(),
+    status: brandChannelStatusEnum('status').default('connected').notNull(),
+    metadata: jsonb('metadata').$type<Record<string, unknown> | null>().default(null),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => ({
-    waPhoneIdx: uniqueIndex('brands_wa_phone_idx').on(t.waPhone),
+    kindExternalIdx: uniqueIndex('brand_channels_kind_external_idx').on(t.kind, t.externalId),
+    brandKindIdx: index('brand_channels_brand_kind_idx').on(t.brandId, t.kind),
   }),
 );
 
@@ -219,6 +263,10 @@ export type IgAnalysisSnapshot = {
 
 export type Brand = typeof brands.$inferSelect;
 export type NewBrand = typeof brands.$inferInsert;
+export type BrandChannel = typeof brandChannels.$inferSelect;
+export type NewBrandChannel = typeof brandChannels.$inferInsert;
+export type ChannelKind = (typeof channelKindEnum.enumValues)[number];
+export type BrandChannelStatus = (typeof brandChannelStatusEnum.enumValues)[number];
 export type PostDraft = typeof postDrafts.$inferSelect;
 export type NewPostDraft = typeof postDrafts.$inferInsert;
 export type WorkflowRun = typeof workflowRuns.$inferSelect;

@@ -11,10 +11,11 @@ describe('brandOnboarding workflow shape', () => {
     const stepIds = brandOnboardingWorkflow.stepGraph
       .map((entry) => 'step' in entry && entry.step ? entry.step.id : null)
       .filter(Boolean);
+    // Step ids come from the plan-driven adapter (`onboarding:<plan-step-id>`).
+    // Adding/removing/reordering the plan should be reflected here.
     expect(stepIds).toEqual([
-      'ask-ig-handle',
-      'run-analysis-and-confirm',
-      'ask-cadence-timezone-or-finalize',
+      'onboarding:brand_kit',
+      'onboarding:cadence_timezone',
     ]);
   });
 });

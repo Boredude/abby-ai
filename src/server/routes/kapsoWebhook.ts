@@ -58,7 +58,12 @@ kapsoWebhookRoute.post('/webhooks/kapso', async (c) => {
   }
 
   logger.info(
-    { kind: parsed.kind, fromPhone: parsed.fromPhone, waMessageId: parsed.waMessageId },
+    {
+      kind: parsed.kind,
+      channel: parsed.channelKind,
+      externalUserId: parsed.externalUserId,
+      externalMessageId: parsed.externalMessageId,
+    },
     'Kapso webhook: dispatching',
   );
 

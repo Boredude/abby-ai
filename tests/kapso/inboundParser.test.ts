@@ -23,14 +23,15 @@ describe('decodeButtonId', () => {
 });
 
 describe('parseKapsoEvent', () => {
-  it('parses a text message (flat Kapso payload)', () => {
+  it('parses a text message into a whatsapp ChannelMessage', () => {
     const event: KapsoMessageReceivedEvent = {
       message: { id: 'wamid.1', from: '15551234567', type: 'text', text: { body: 'hi duffy' } },
       conversation: { id: 'conv-1', contact_name: 'Tester' },
     };
     expect(parseKapsoEvent(event)).toEqual({
-      waMessageId: 'wamid.1',
-      fromPhone: '15551234567',
+      channelKind: 'whatsapp',
+      externalUserId: '15551234567',
+      externalMessageId: 'wamid.1',
       contactName: 'Tester',
       conversationId: 'conv-1',
       kind: 'text',
@@ -52,6 +53,7 @@ describe('parseKapsoEvent', () => {
     };
     const parsed = parseKapsoEvent(event);
     expect(parsed?.kind).toBe('button');
+    expect(parsed?.channelKind).toBe('whatsapp');
     expect(parsed && parsed.kind === 'button' && parsed.decision).toBe('approve');
     expect(parsed && parsed.kind === 'button' && parsed.draftId).toBe('draft-abc');
   });

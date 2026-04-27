@@ -1,25 +1,43 @@
 import { describe, expect, it, vi } from 'vitest';
+import { makeMockBoundChannel, makeMockChannel } from '../helpers/mockChannel.js';
 
-// vitest hoists vi.mock above imports, so any references to `vi.fn()` shared
-// with assertions must be declared via `vi.hoisted` to also be hoisted.
+const PHONE = '15551112222';
+const channelMocks = makeMockChannel(makeMockBoundChannel(PHONE));
+
 const mocks = vi.hoisted(() => ({
   resumeWorkflow: vi.fn(async (_args: unknown) => ({ status: 'success' as const })),
   startWorkflow: vi.fn(async (_args: unknown) => ({ runId: 'new', status: 'suspended' as const })),
-  sendText: vi.fn(async (..._args: unknown[]) => ({})),
   agentGenerate: vi.fn(async (..._args: unknown[]) => ({ text: 'agent reply' })),
 }));
 
-vi.mock('../../src/db/repositories/brands.js', () => ({
-  upsertBrandByPhone: vi.fn(async ({ waPhone }: { waPhone: string }) => ({
-    id: 'brand-1',
-    waPhone,
-    igHandle: 'acme',
-    voiceJson: null,
-    cadenceJson: null,
-    timezone: 'UTC',
-    status: 'active',
-    createdAt: new Date(),
-    updatedAt: new Date(),
+vi.mock('../../src/db/repositories/brandChannels.js', () => ({
+  upsertBrandByChannel: vi.fn(async ({ kind, externalId }: { kind: string; externalId: string }) => ({
+    brand: {
+      id: 'brand-1',
+      igHandle: 'acme',
+      voiceJson: null,
+      cadenceJson: null,
+      brandKitJson: null,
+      designSystemJson: null,
+      igAnalysisJson: null,
+      brandBoardImageUrl: null,
+      timezone: 'UTC',
+      status: 'active' as const,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    channel: {
+      id: 'bc-1',
+      brandId: 'brand-1',
+      kind,
+      externalId,
+      isPrimary: true,
+      status: 'connected' as const,
+      metadata: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    created: false,
   })),
 }));
 
@@ -44,8 +62,10 @@ vi.mock('../../src/services/workflowRunner.js', () => ({
   startWorkflow: mocks.startWorkflow,
 }));
 
-vi.mock('../../src/services/kapso/client.js', () => ({
-  sendText: mocks.sendText,
+vi.mock('../../src/channels/registry.js', () => ({
+  getChannel: vi.fn(() => channelMocks.channel),
+  getBrandChannel: vi.fn(async () => channelMocks.bound),
+  requireBrandChannel: vi.fn(async () => channelMocks.bound),
 }));
 
 vi.mock('../../src/mastra/agents/duffy.js', () => ({
@@ -54,19 +74,18 @@ vi.mock('../../src/mastra/agents/duffy.js', () => ({
 
 import { dispatchInboundMessage } from '../../src/services/inboundDispatcher.js';
 
-const PHONE = '15551112222';
-
 describe('dispatchInboundMessage → postDraftApproval resume payload', () => {
   it('approve button maps to { decision: "approve" }', async () => {
     mocks.resumeWorkflow.mockClear();
     await dispatchInboundMessage({
+      channelKind: 'whatsapp',
+      externalUserId: PHONE,
+      externalMessageId: 'm1',
       kind: 'button',
       buttonId: 'approve_draft-1',
       buttonTitle: 'Approve',
       decision: 'approve',
       draftId: 'draft-1',
-      waMessageId: 'm1',
-      fromPhone: PHONE,
     });
     expect(mocks.resumeWorkflow).toHaveBeenCalledTimes(1);
     expect(mocks.resumeWorkflow.mock.calls[0]?.[0]).toMatchObject({
@@ -79,13 +98,14 @@ describe('dispatchInboundMessage → postDraftApproval resume payload', () => {
   it('edit button maps to { decision: "edit" }', async () => {
     mocks.resumeWorkflow.mockClear();
     await dispatchInboundMessage({
+      channelKind: 'whatsapp',
+      externalUserId: PHONE,
+      externalMessageId: 'm2',
       kind: 'button',
       buttonId: 'edit_draft-1',
       buttonTitle: 'Edit',
       decision: 'edit',
       draftId: 'draft-1',
-      waMessageId: 'm2',
-      fromPhone: PHONE,
     });
     expect(mocks.resumeWorkflow.mock.calls[0]?.[0]).toMatchObject({
       resumeData: { decision: 'edit' },
@@ -95,13 +115,14 @@ describe('dispatchInboundMessage → postDraftApproval resume payload', () => {
   it('reject button maps to { decision: "reject" }', async () => {
     mocks.resumeWorkflow.mockClear();
     await dispatchInboundMessage({
+      channelKind: 'whatsapp',
+      externalUserId: PHONE,
+      externalMessageId: 'm3',
       kind: 'button',
       buttonId: 'reject_draft-1',
       buttonTitle: 'Reject',
       decision: 'reject',
       draftId: 'draft-1',
-      waMessageId: 'm3',
-      fromPhone: PHONE,
     });
     expect(mocks.resumeWorkflow.mock.calls[0]?.[0]).toMatchObject({
       resumeData: { decision: 'reject' },
@@ -111,10 +132,11 @@ describe('dispatchInboundMessage → postDraftApproval resume payload', () => {
   it('free text reply during suspended approval is treated as edit-with-note', async () => {
     mocks.resumeWorkflow.mockClear();
     await dispatchInboundMessage({
+      channelKind: 'whatsapp',
+      externalUserId: PHONE,
+      externalMessageId: 'm4',
       kind: 'text',
       text: 'Make the caption more punchy please',
-      waMessageId: 'm4',
-      fromPhone: PHONE,
     });
     expect(mocks.resumeWorkflow.mock.calls[0]?.[0]).toMatchObject({
       resumeData: { decision: 'edit', editNote: 'Make the caption more punchy please' },
