@@ -61,10 +61,12 @@ async function main(): Promise<void> {
     }
     const r = summary.rowsDeleted;
     console.log(`Reset brand ${summary.brandId} (${summary.channelKind}:${summary.externalId})`);
-    console.log(`  mastra_messages:          ${r.mastraMessages} rows deleted`);
-    console.log(`  mastra_threads:           ${r.mastraThreads} rows deleted`);
-    console.log(`  mastra_resources:         ${r.mastraResources} rows deleted`);
-    console.log(`  mastra_workflow_snapshot: ${r.mastraWorkflowSnapshots} rows deleted`);
+    console.log(`  mastra_messages:             ${r.mastraMessages} rows deleted`);
+    console.log(`  mastra_threads:              ${r.mastraThreads} rows deleted`);
+    console.log(`  mastra_resources:            ${r.mastraResources} rows deleted`);
+    console.log(`  mastra_workflow_snapshot:    ${r.mastraWorkflowSnapshots} rows deleted`);
+    console.log(`  mastra_observational_memory: ${r.mastraObservationalMemory} rows deleted`);
+    console.log(`  pgboss.job (brand-scoped):   ${r.pgBossJobs} rows deleted`);
     console.log(
       `  brands (cascades to brand_channels/conversations/post_drafts/workflow_runs): ${r.brand} row deleted`,
     );

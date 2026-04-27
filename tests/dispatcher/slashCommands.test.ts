@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => ({
         mastraThreads: 1,
         mastraResources: 1,
         mastraWorkflowSnapshots: 1,
+        mastraObservationalMemory: 1,
+        pgBossJobs: 1,
         brand: 1,
       },
     }),
@@ -148,6 +150,8 @@ describe('dispatchInboundMessage → slash commands', () => {
         mastraThreads: 0,
         mastraResources: 0,
         mastraWorkflowSnapshots: 0,
+        mastraObservationalMemory: 0,
+        pgBossJobs: 0,
         brand: 0,
       },
     });
