@@ -1,0 +1,55 @@
+---
+description: Always use git worktrees so multiple agents can work on the codebase in parallel
+alwaysApply: true
+---
+
+# Always Work In A Git Worktree
+
+To allow multiple agents to work on this repo simultaneously without stepping on each other (branch switches, file changes, dirty state), every task MUST be performed in a dedicated git worktree on its own branch.
+
+## Workflow
+
+1. Before making any code changes, check whether you are already in a worktree dedicated to this task:
+
+```bash
+git rev-parse --show-toplevel
+git worktree list
+```
+
+2. If you are still in the main checkout (or sharing a worktree with another task), create a new one off the latest `main` and switch into it:
+
+```bash
+# from the main repo root
+git fetch origin
+git worktree add -b feat/<feature_name> ../duffy-ai-feat-<feature_name> origin/main
+cd ../duffy-ai-feat-<feature_name>
+```
+
+Use `feat/<feature_name>` for features and `fix/<fix_name>` for fixes (matches the project branch convention).
+
+3. Do ALL editing, testing, and committing inside that worktree directory. Never `git checkout <other-branch>` in a worktree another agent might be using.
+
+4. When the task is done and merged, clean up:
+
+```bash
+# from the main repo root
+git worktree remove ../duffy-ai-feat-<feature_name>
+git branch -d feat/<feature_name>   # only if fully merged
+```
+
+## Rules
+
+- One worktree per task/branch. Do not reuse a worktree for an unrelated task.
+- Never run `git checkout <branch>` to switch branches in-place — create a new worktree instead.
+- Place worktrees as siblings of the main repo (e.g. `../duffy-ai-<slug>`), never nested inside it.
+- If a worktree for the target branch already exists, `cd` into it instead of creating a duplicate.
+- If you cannot create a worktree (e.g. uncommitted changes block it), stop and report the blocker rather than working in the shared checkout.
+
+## Quick Reference
+
+```bash
+git worktree list                                  # see all active worktrees
+git worktree add -b <branch> <path> origin/main    # create new worktree + branch
+git worktree remove <path>                         # clean up when done
+git worktree prune                                 # drop stale entries
+```
