@@ -1,22 +1,5 @@
+import type { ChannelMessage } from '../../channels/types.js';
 import type { KapsoMessageReceivedEvent } from './types.js';
-
-export type ParsedInboundMessage = {
-  waMessageId: string;
-  fromPhone: string;
-  contactName?: string;
-  conversationId?: string;
-} & (
-  | { kind: 'text'; text: string }
-  | {
-      kind: 'button';
-      buttonId: string;
-      buttonTitle: string;
-      decision?: 'approve' | 'edit' | 'reject';
-      draftId?: string;
-    }
-  | { kind: 'image'; mediaId: string; mimeType?: string; caption?: string; mediaLink?: string }
-  | { kind: 'unsupported'; rawType: string }
-);
 
 /**
  * Decodes a button payload of the form `approve_<draftId>` / `edit_<draftId>` / `reject_<draftId>`.
@@ -32,16 +15,23 @@ export function decodeButtonId(buttonId: string): { decision?: 'approve' | 'edit
   return {};
 }
 
-export function parseKapsoEvent(event: KapsoMessageReceivedEvent): ParsedInboundMessage | null {
+/**
+ * Translates a raw Kapso webhook payload into the channel-agnostic
+ * `ChannelMessage` the dispatcher works on. Returns `null` for payloads we
+ * can't decode at all (no message id / no sender) so the webhook route can
+ * 200-ack and ignore.
+ */
+export function parseKapsoEvent(event: KapsoMessageReceivedEvent): ChannelMessage | null {
   const m = event.message;
   if (!m?.id || !m?.from) return null;
 
   const base = {
-    waMessageId: m.id,
-    fromPhone: m.from,
+    channelKind: 'whatsapp' as const,
+    externalUserId: m.from,
+    externalMessageId: m.id,
     ...(event.conversation?.contact_name ? { contactName: event.conversation.contact_name } : {}),
     ...(event.conversation?.id ? { conversationId: event.conversation.id } : {}),
-  } as const;
+  };
 
   switch (m.type) {
     case 'text': {

@@ -1,23 +1,42 @@
 import { describe, expect, it, vi } from 'vitest';
+import { makeMockBoundChannel, makeMockChannel } from '../helpers/mockChannel.js';
+
+const channelMocks = makeMockChannel(makeMockBoundChannel('15558889999'));
 
 const mocks = vi.hoisted(() => ({
   startWorkflow: vi.fn(async (_args: unknown) => ({ runId: 'run-x', status: 'suspended' as const })),
   resumeWorkflow: vi.fn(async (_args: unknown) => ({ status: 'success' as const })),
-  sendText: vi.fn(async (..._args: unknown[]) => ({})),
   agentGenerate: vi.fn(async (..._args: unknown[]) => ({ text: 'unused' })),
 }));
 
-vi.mock('../../src/db/repositories/brands.js', () => ({
-  upsertBrandByPhone: vi.fn(async ({ waPhone }: { waPhone: string }) => ({
-    id: 'brand-new',
-    waPhone,
-    igHandle: null,
-    voiceJson: null,
-    cadenceJson: null,
-    timezone: 'UTC',
-    status: 'pending',
-    createdAt: new Date(),
-    updatedAt: new Date(),
+vi.mock('../../src/db/repositories/brandChannels.js', () => ({
+  upsertBrandByChannel: vi.fn(async ({ kind, externalId }: { kind: string; externalId: string }) => ({
+    brand: {
+      id: 'brand-new',
+      igHandle: null,
+      voiceJson: null,
+      cadenceJson: null,
+      brandKitJson: null,
+      designSystemJson: null,
+      igAnalysisJson: null,
+      brandBoardImageUrl: null,
+      timezone: 'UTC',
+      status: 'pending' as const,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    channel: {
+      id: 'bc-1',
+      brandId: 'brand-new',
+      kind,
+      externalId,
+      isPrimary: true,
+      status: 'connected' as const,
+      metadata: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    created: true,
   })),
 }));
 
@@ -31,8 +50,10 @@ vi.mock('../../src/services/workflowRunner.js', () => ({
   resumeWorkflow: mocks.resumeWorkflow,
 }));
 
-vi.mock('../../src/services/kapso/client.js', () => ({
-  sendText: mocks.sendText,
+vi.mock('../../src/channels/registry.js', () => ({
+  getChannel: vi.fn(() => channelMocks.channel),
+  getBrandChannel: vi.fn(async () => channelMocks.bound),
+  requireBrandChannel: vi.fn(async () => channelMocks.bound),
 }));
 
 vi.mock('../../src/mastra/agents/duffy.js', () => ({
@@ -45,10 +66,11 @@ describe('dispatchInboundMessage → onboarding for new brand', () => {
   it('starts brandOnboarding when brand status is pending and no active run', async () => {
     mocks.startWorkflow.mockClear();
     await dispatchInboundMessage({
+      channelKind: 'whatsapp',
+      externalUserId: '15558889999',
+      externalMessageId: 'm-1',
       kind: 'text',
       text: 'hi',
-      waMessageId: 'm-1',
-      fromPhone: '15558889999',
     });
     expect(mocks.startWorkflow).toHaveBeenCalledTimes(1);
     expect(mocks.startWorkflow.mock.calls[0]?.[0]).toMatchObject({

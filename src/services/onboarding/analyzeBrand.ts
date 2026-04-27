@@ -1,5 +1,6 @@
 import { logger } from '../../config/logger.js';
 import { updateBrand } from '../../db/repositories/brands.js';
+import { pickOk, runParallel } from '../../mastra/onboarding/parallel.js';
 import {
   fetchInstagramProfile,
   InstagramScraperError,
@@ -96,30 +97,65 @@ export async function analyzeBrand(input: {
     'Sending full IG grid to analyzers',
   );
 
-  let visuals;
-  let voice;
-  try {
-    [visuals, voice] = await Promise.all([
-      analyzeInstagramVisuals({
-        handle: input.handle,
-        imageUrls,
-        ...(input.brandHint ? { brandHint: input.brandHint } : {}),
-      }),
-      analyzeInstagramVoice({
-        handle: input.handle,
-        ...(scrape.profile.biography ? { biography: scrape.profile.biography } : {}),
-        captions,
-        ...(input.brandHint ? { brandHint: input.brandHint } : {}),
-      }),
-    ]);
-  } catch (err) {
-    const reason = classifyAnalyzerError(err);
-    log.error({ err, reason }, 'Brand analysis (visuals/voice) failed');
+  // Fan-out: run the visual + voice analyzers in parallel as named subtasks
+  // of the brand-kit step. Adding a future analyzer (e.g. a Playwright grid
+  // screenshot or a competitor-scrape) is a one-line addition here.
+  type AnalyzerOutput =
+    | Awaited<ReturnType<typeof analyzeInstagramVisuals>>
+    | Awaited<ReturnType<typeof analyzeInstagramVoice>>;
+  const fanout = await runParallel<AnalyzerOutput>(
+    [
+      {
+        name: 'visuals',
+        run: () =>
+          analyzeInstagramVisuals({
+            handle: input.handle,
+            imageUrls,
+            ...(input.brandHint ? { brandHint: input.brandHint } : {}),
+          }),
+      },
+      {
+        name: 'voice',
+        run: () =>
+          analyzeInstagramVoice({
+            handle: input.handle,
+            ...(scrape.profile.biography ? { biography: scrape.profile.biography } : {}),
+            captions,
+            ...(input.brandHint ? { brandHint: input.brandHint } : {}),
+          }),
+      },
+    ],
+    { label: 'brandKit:analyze' },
+  );
+
+  const firstFailure = fanout.find((r) => !r.ok);
+  if (firstFailure && !firstFailure.ok) {
+    const reason = classifyAnalyzerError(firstFailure.error);
+    log.error(
+      { err: firstFailure.error, task: firstFailure.name, reason },
+      'Brand analysis fan-out failed',
+    );
     return {
       ok: false,
       handle: input.handle,
       reason,
-      message: (err as Error).message,
+      message: firstFailure.error.message,
+    };
+  }
+
+  const visuals = pickOk(fanout, 'visuals') as
+    | Awaited<ReturnType<typeof analyzeInstagramVisuals>>
+    | undefined;
+  const voice = pickOk(fanout, 'voice') as
+    | Awaited<ReturnType<typeof analyzeInstagramVoice>>
+    | undefined;
+  if (!visuals || !voice) {
+    log.error('Brand analysis fan-out missing visuals or voice');
+    return {
+      ok: false,
+      handle: input.handle,
+      reason: 'unknown',
+      message: 'Brand analysis fan-out missing required outputs',
     };
   }
 

@@ -1,7 +1,9 @@
 import type pg from 'pg';
+import type { ChannelKind } from '../../db/schema.js';
 
 export type ResetSummary = {
-  phone: string;
+  channelKind: ChannelKind;
+  externalId: string;
   brandId: string | null;
   rowsDeleted: {
     mastraMessages: number;
@@ -12,39 +14,38 @@ export type ResetSummary = {
   };
 };
 
+const EMPTY_ROWS: ResetSummary['rowsDeleted'] = {
+  mastraMessages: 0,
+  mastraThreads: 0,
+  mastraResources: 0,
+  mastraWorkflowSnapshots: 0,
+  brand: 0,
+};
+
 /**
- * Wipes all server-side state for the given WhatsApp phone so a brand-new
- * onboarding conversation can begin on the same number.
+ * Wipes all server-side state for the brand reachable on `(channelKind, externalId)`.
  *
  * Removes:
- *   - the brand row (cascades to conversations, post_drafts, workflow_runs)
+ *   - the brand row (cascades to conversations, post_drafts, workflow_runs, brand_channels)
  *   - Mastra memory threads + messages keyed by `brand:<brandId>` or resourceId
  *   - the Mastra resource row keyed by brandId
  *   - any Mastra workflow snapshots tied to that resource
  *
  * Idempotent: returns 0 counts (and `brandId: null`) if no brand is found.
  */
-export async function resetBrandByPhone(pool: pg.Pool, rawPhone: string): Promise<ResetSummary> {
-  const phone = rawPhone.replace(/[^\d]/g, '');
-  if (!phone) {
-    throw new Error(`Could not extract digits from phone "${rawPhone}"`);
-  }
+export async function resetBrandByChannel(
+  pool: pg.Pool,
+  args: { kind: ChannelKind; externalId: string },
+): Promise<ResetSummary> {
+  const { kind, externalId } = args;
 
-  const empty: ResetSummary['rowsDeleted'] = {
-    mastraMessages: 0,
-    mastraThreads: 0,
-    mastraResources: 0,
-    mastraWorkflowSnapshots: 0,
-    brand: 0,
-  };
-
-  const found = await pool.query<{ id: string }>(
-    'select id from brands where wa_phone = $1',
-    [phone],
+  const found = await pool.query<{ brand_id: string }>(
+    'select brand_id from brand_channels where kind = $1 and external_id = $2',
+    [kind, externalId],
   );
-  const brandId = found.rows[0]?.id ?? null;
+  const brandId = found.rows[0]?.brand_id ?? null;
   if (!brandId) {
-    return { phone, brandId: null, rowsDeleted: empty };
+    return { channelKind: kind, externalId, brandId: null, rowsDeleted: EMPTY_ROWS };
   }
 
   const threadId = `brand:${brandId}`;
@@ -70,7 +71,8 @@ export async function resetBrandByPhone(pool: pg.Pool, rawPhone: string): Promis
     await client.query('commit');
 
     return {
-      phone,
+      channelKind: kind,
+      externalId,
       brandId,
       rowsDeleted: {
         mastraMessages: msgs.rowCount ?? 0,

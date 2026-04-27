@@ -1,7 +1,7 @@
+import { requireBrandChannel } from '../../channels/registry.js';
 import { logger } from '../../config/logger.js';
 import { findBrandById } from '../../db/repositories/brands.js';
 import { findDraftById, updateDraftStatus } from '../../db/repositories/postDrafts.js';
-import { sendImage, sendText } from '../../services/kapso/client.js';
 
 export type DeliverApprovedPostPayload = {
   draftId: string;
@@ -10,7 +10,8 @@ export type DeliverApprovedPostPayload = {
 
 /**
  * pg-boss handler: at the scheduled time, send the approved post (caption +
- * image) back to the brand on WhatsApp so they can publish it manually.
+ * image) back to the brand on their primary channel so they can publish it
+ * manually.
  *
  * MVP scope: Duffy does NOT post to Instagram herself yet — she just delivers
  * the asset to the brand owner.
@@ -37,12 +38,12 @@ export async function handleDeliverApprovedPost(payload: DeliverApprovedPostPayl
     return;
   }
 
-  await sendText(
-    brand.waPhone,
+  const channel = await requireBrandChannel(brand.id);
+  await channel.sendText(
     `📣 Time to post! Here's your approved content for @${brand.igHandle ?? 'your brand'}.\n\nCopy the caption below and pair it with the image I'm sending right after.`,
   );
-  await sendText(brand.waPhone, draft.caption);
-  await sendImage(brand.waPhone, imageUrl, 'Use this image with the caption above ☝️');
+  await channel.sendText(draft.caption);
+  await channel.sendImage(imageUrl, 'Use this image with the caption above ☝️');
 
   await updateDraftStatus(draftId, 'delivered');
   logger.info({ draftId, brandId: brand.id }, 'deliverApprovedPost: delivered');

@@ -1,5 +1,6 @@
 import { createStep, createWorkflow } from '@mastra/core/workflows';
 import { z } from 'zod';
+import { requireBrandChannel } from '../../channels/registry.js';
 import { logger } from '../../config/logger.js';
 import { findBrandById } from '../../db/repositories/brands.js';
 import {
@@ -9,7 +10,6 @@ import {
   updateDraftStatus,
 } from '../../db/repositories/postDrafts.js';
 import { QUEUES, getBoss } from '../../jobs/queue.js';
-import { sendImageWithButtons, sendText } from '../../services/kapso/client.js';
 import { generateDraftForBrand } from '../../services/draftGenerator.js';
 
 /**
@@ -113,17 +113,25 @@ const requestApproval = createStep({
         `${draft.caption.length > 700 ? draft.caption.slice(0, 700) + '…' : draft.caption}\n\n` +
         `📅 Scheduled to send to you: ${when}`;
 
-      await sendImageWithButtons({
-        to: brand.waPhone,
-        imageUrl,
-        bodyText: body,
-        footer: 'Tap a button below',
-        buttons: [
-          { type: 'reply', reply: { id: `approve_${draft.id}`, title: 'Approve' } },
-          { type: 'reply', reply: { id: `edit_${draft.id}`, title: 'Edit' } },
-          { type: 'reply', reply: { id: `reject_${draft.id}`, title: 'Reject' } },
-        ],
-      });
+      const channel = await requireBrandChannel(brand.id);
+      if (channel.capabilities.supportsImageWithButtons) {
+        await channel.sendImageWithButtons({
+          imageUrl,
+          bodyText: body,
+          footer: 'Tap a button below',
+          buttons: [
+            { id: `approve_${draft.id}`, title: 'Approve' },
+            { id: `edit_${draft.id}`, title: 'Edit' },
+            { id: `reject_${draft.id}`, title: 'Reject' },
+          ],
+        });
+      } else {
+        // Capability fallback: send the image, then ask for a textual reply.
+        await channel.sendImage(imageUrl, body);
+        await channel.sendText(
+          `Reply 'approve', 'edit', or 'reject' for draft ${draft.id}.`,
+        );
+      }
       await updateDraftStatus(draft.id, 'pending_approval');
 
       await suspend({ draftId: draft.id });
@@ -159,6 +167,7 @@ const handleDecision = createStep({
     const { brandId, draftId, scheduledAt, decision, editNote } = inputData;
     const brand = await findBrandById(brandId);
     if (!brand) throw new Error(`Brand ${brandId} not found`);
+    const channel = await requireBrandChannel(brandId);
 
     if (decision === 'approve') {
       await updateDraftStatus(draftId, 'approved');
@@ -169,8 +178,7 @@ const handleDecision = createStep({
         { startAfter: new Date(scheduledAt) },
       );
       const when = new Date(scheduledAt).toLocaleString('en-US', { timeZone: brand.timezone });
-      await sendText(
-        brand.waPhone,
+      await channel.sendText(
         `Locked in 🔒 — I'll send the final post back to you on ${when} so you can publish it.`,
       );
       logger.info({ draftId, brandId, scheduledAt }, 'Draft approved and delivery scheduled');
@@ -179,8 +187,7 @@ const handleDecision = createStep({
 
     if (decision === 'reject') {
       await updateDraftStatus(draftId, 'rejected');
-      await sendText(
-        brand.waPhone,
+      await channel.sendText(
         `No worries — tossed that one. I'll come back with a different angle next time.`,
       );
       return { brandId, draftId, scheduledAt, finalDecision: decision };
@@ -192,7 +199,7 @@ const handleDecision = createStep({
       await appendEditNote(draftId, { at: new Date().toISOString(), note });
     }
     const briefingHint = note || 'The user wants this post revised. Try a fresh angle.';
-    await sendText(brand.waPhone, "On it — taking another swing now ✏️");
+    await channel.sendText("On it — taking another swing now ✏️");
     return {
       brandId,
       draftId,

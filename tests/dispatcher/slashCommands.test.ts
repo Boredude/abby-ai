@@ -1,11 +1,19 @@
 import { describe, expect, it, vi } from 'vitest';
 import { parseSlashCommand } from '../../src/services/slashCommands.js';
 import type { ResetSummary } from '../../src/services/admin/resetBrandState.js';
+import { makeMockBoundChannel, makeMockChannel } from '../helpers/mockChannel.js';
+
+const PHONE = '15558889999';
+const channelMocks = makeMockChannel(makeMockBoundChannel(PHONE));
 
 const mocks = vi.hoisted(() => ({
-  resetBrandByPhone: vi.fn(
-    async (_pool: unknown, _phone: string): Promise<ResetSummary> => ({
-      phone: '15558889999',
+  resetBrandByChannel: vi.fn(
+    async (
+      _pool: unknown,
+      args: { kind: 'whatsapp'; externalId: string },
+    ): Promise<ResetSummary> => ({
+      channelKind: args.kind,
+      externalId: args.externalId,
       brandId: 'brand-x',
       rowsDeleted: {
         mastraMessages: 1,
@@ -16,17 +24,33 @@ const mocks = vi.hoisted(() => ({
       },
     }),
   ),
-  sendText: vi.fn(async (..._args: unknown[]) => ({})),
-  upsertBrandByPhone: vi.fn(async (..._args: unknown[]) => ({
-    id: 'brand-new',
-    waPhone: '15558889999',
-    igHandle: null,
-    voiceJson: null,
-    cadenceJson: null,
-    timezone: 'UTC',
-    status: 'pending' as const,
-    createdAt: new Date(),
-    updatedAt: new Date(),
+  upsertBrandByChannel: vi.fn(async ({ kind, externalId }: { kind: string; externalId: string }) => ({
+    brand: {
+      id: 'brand-new',
+      igHandle: null,
+      voiceJson: null,
+      cadenceJson: null,
+      brandKitJson: null,
+      designSystemJson: null,
+      igAnalysisJson: null,
+      brandBoardImageUrl: null,
+      timezone: 'UTC',
+      status: 'pending' as const,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    channel: {
+      id: 'bc-1',
+      brandId: 'brand-new',
+      kind,
+      externalId,
+      isPrimary: true,
+      status: 'connected' as const,
+      metadata: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    created: true,
   })),
   startWorkflow: vi.fn(async (..._args: unknown[]) => ({ runId: 'r', status: 'suspended' as const })),
   resumeWorkflow: vi.fn(async (..._args: unknown[]) => ({ status: 'success' as const })),
@@ -35,19 +59,15 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../src/services/admin/resetBrandState.js', () => ({
-  resetBrandByPhone: mocks.resetBrandByPhone,
-}));
-
-vi.mock('../../src/services/kapso/client.js', () => ({
-  sendText: mocks.sendText,
+  resetBrandByChannel: mocks.resetBrandByChannel,
 }));
 
 vi.mock('../../src/db/client.js', () => ({
   getPool: mocks.getPool,
 }));
 
-vi.mock('../../src/db/repositories/brands.js', () => ({
-  upsertBrandByPhone: mocks.upsertBrandByPhone,
+vi.mock('../../src/db/repositories/brandChannels.js', () => ({
+  upsertBrandByChannel: mocks.upsertBrandByChannel,
 }));
 
 vi.mock('../../src/db/repositories/workflowRuns.js', () => ({
@@ -58,6 +78,12 @@ vi.mock('../../src/db/repositories/workflowRuns.js', () => ({
 vi.mock('../../src/services/workflowRunner.js', () => ({
   startWorkflow: mocks.startWorkflow,
   resumeWorkflow: mocks.resumeWorkflow,
+}));
+
+vi.mock('../../src/channels/registry.js', () => ({
+  getChannel: vi.fn(() => channelMocks.channel),
+  getBrandChannel: vi.fn(async () => channelMocks.bound),
+  requireBrandChannel: vi.fn(async () => channelMocks.bound),
 }));
 
 vi.mock('../../src/mastra/agents/duffy.js', () => ({
@@ -87,30 +113,35 @@ describe('parseSlashCommand', () => {
 
 describe('dispatchInboundMessage → slash commands', () => {
   it('routes /reset before any brand/workflow plumbing', async () => {
-    mocks.resetBrandByPhone.mockClear();
-    mocks.sendText.mockClear();
-    mocks.upsertBrandByPhone.mockClear();
+    mocks.resetBrandByChannel.mockClear();
+    channelMocks.bound.sendText.mockClear();
+    mocks.upsertBrandByChannel.mockClear();
     mocks.startWorkflow.mockClear();
 
     await dispatchInboundMessage({
+      channelKind: 'whatsapp',
+      externalUserId: PHONE,
+      externalMessageId: 'm-1',
       kind: 'text',
       text: '/reset',
-      waMessageId: 'm-1',
-      fromPhone: '15558889999',
     });
 
-    expect(mocks.resetBrandByPhone).toHaveBeenCalledTimes(1);
-    expect(mocks.resetBrandByPhone.mock.calls[0]?.[1]).toBe('15558889999');
-    expect(mocks.sendText).toHaveBeenCalledTimes(1);
-    expect(mocks.upsertBrandByPhone).not.toHaveBeenCalled();
+    expect(mocks.resetBrandByChannel).toHaveBeenCalledTimes(1);
+    expect(mocks.resetBrandByChannel.mock.calls[0]?.[1]).toEqual({
+      kind: 'whatsapp',
+      externalId: PHONE,
+    });
+    expect(channelMocks.bound.sendText).toHaveBeenCalledTimes(1);
+    expect(mocks.upsertBrandByChannel).not.toHaveBeenCalled();
     expect(mocks.startWorkflow).not.toHaveBeenCalled();
   });
 
   it('replies with a friendly note when there is no brand to reset', async () => {
-    mocks.resetBrandByPhone.mockClear();
-    mocks.sendText.mockClear();
-    mocks.resetBrandByPhone.mockResolvedValueOnce({
-      phone: '15558889999',
+    mocks.resetBrandByChannel.mockClear();
+    channelMocks.bound.sendText.mockClear();
+    mocks.resetBrandByChannel.mockResolvedValueOnce({
+      channelKind: 'whatsapp',
+      externalId: PHONE,
       brandId: null,
       rowsDeleted: {
         mastraMessages: 0,
@@ -122,60 +153,64 @@ describe('dispatchInboundMessage → slash commands', () => {
     });
 
     await dispatchInboundMessage({
+      channelKind: 'whatsapp',
+      externalUserId: PHONE,
+      externalMessageId: 'm-2',
       kind: 'text',
       text: '/reset',
-      waMessageId: 'm-2',
-      fromPhone: '15558889999',
     });
 
-    const reply = mocks.sendText.mock.calls[0]?.[1] as string;
+    const reply = channelMocks.bound.sendText.mock.calls[0]?.[0] as string;
     expect(reply.toLowerCase()).toContain('nothing to reset');
   });
 
   it('responds to /help with a command list', async () => {
-    mocks.resetBrandByPhone.mockClear();
-    mocks.sendText.mockClear();
+    mocks.resetBrandByChannel.mockClear();
+    channelMocks.bound.sendText.mockClear();
 
     await dispatchInboundMessage({
+      channelKind: 'whatsapp',
+      externalUserId: PHONE,
+      externalMessageId: 'm-3',
       kind: 'text',
       text: '/help',
-      waMessageId: 'm-3',
-      fromPhone: '15558889999',
     });
 
-    expect(mocks.resetBrandByPhone).not.toHaveBeenCalled();
-    const reply = mocks.sendText.mock.calls[0]?.[1] as string;
+    expect(mocks.resetBrandByChannel).not.toHaveBeenCalled();
+    const reply = channelMocks.bound.sendText.mock.calls[0]?.[0] as string;
     expect(reply).toContain('/reset');
     expect(reply).toContain('/help');
   });
 
   it('replies with help text for unknown commands', async () => {
-    mocks.sendText.mockClear();
+    channelMocks.bound.sendText.mockClear();
 
     await dispatchInboundMessage({
+      channelKind: 'whatsapp',
+      externalUserId: PHONE,
+      externalMessageId: 'm-4',
       kind: 'text',
       text: '/whatever',
-      waMessageId: 'm-4',
-      fromPhone: '15558889999',
     });
 
-    const reply = mocks.sendText.mock.calls[0]?.[1] as string;
+    const reply = channelMocks.bound.sendText.mock.calls[0]?.[0] as string;
     expect(reply.toLowerCase()).toContain('unknown command');
     expect(reply).toContain('/whatever');
   });
 
   it('does NOT treat regular text as a slash command', async () => {
-    mocks.resetBrandByPhone.mockClear();
-    mocks.upsertBrandByPhone.mockClear();
+    mocks.resetBrandByChannel.mockClear();
+    mocks.upsertBrandByChannel.mockClear();
 
     await dispatchInboundMessage({
+      channelKind: 'whatsapp',
+      externalUserId: PHONE,
+      externalMessageId: 'm-5',
       kind: 'text',
       text: 'hi duffy',
-      waMessageId: 'm-5',
-      fromPhone: '15558889999',
     });
 
-    expect(mocks.resetBrandByPhone).not.toHaveBeenCalled();
-    expect(mocks.upsertBrandByPhone).toHaveBeenCalledTimes(1);
+    expect(mocks.resetBrandByChannel).not.toHaveBeenCalled();
+    expect(mocks.upsertBrandByChannel).toHaveBeenCalledTimes(1);
   });
 });
