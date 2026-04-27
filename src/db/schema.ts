@@ -183,6 +183,26 @@ export const webhookEvents = pgTable(
   },
 );
 
+/**
+ * Singleton-style table holding Playwright `storageState` (cookies +
+ * localStorage) for Duffy's Instagram account. The application currently
+ * uses one shared session keyed at `id = 'duffy'`; the column is `text` to
+ * allow future per-account sessions without a migration.
+ *
+ * `status` values:
+ *  - active  — last verified login is good; safe to consume
+ *  - invalid — the captureGrid worker detected a login/challenge redirect
+ *              and we should re-bootstrap before using it again
+ */
+export const igSessions = pgTable('ig_sessions', {
+  id: text('id').primaryKey(),
+  storageStateJson: jsonb('storage_state_json').$type<unknown>().notNull(),
+  status: text('status').notNull(),
+  lastVerifiedAt: timestamp('last_verified_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
 // ---- JSON shapes ----
 
 export type BrandVoice = {
@@ -257,6 +277,19 @@ export type IgAnalysisSnapshot = {
   }>;
   rawVisuals?: unknown;
   rawVoice?: unknown;
+  /**
+   * Optional metadata about the Playwright IG-grid capture that produced the
+   * input images for the visual analyzer. Present when grid capture ran
+   * (whether the analyzer ultimately consumed those screenshots or fell back
+   * to Apify post images).
+   */
+  gridCapture?: {
+    profilePicUrl?: string;
+    viewportShotUrls: string[];
+    capturedAt: string;
+    /** Which image set the visual analyzer actually consumed. */
+    source: 'playwright' | 'apify-fallback';
+  };
 };
 
 // ---- Inferred row types ----
@@ -272,3 +305,6 @@ export type NewPostDraft = typeof postDrafts.$inferInsert;
 export type WorkflowRun = typeof workflowRuns.$inferSelect;
 export type NewWorkflowRun = typeof workflowRuns.$inferInsert;
 export type Conversation = typeof conversations.$inferSelect;
+export type IgSession = typeof igSessions.$inferSelect;
+export type NewIgSession = typeof igSessions.$inferInsert;
+export type IgSessionStatus = 'active' | 'invalid';

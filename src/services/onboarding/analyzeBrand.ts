@@ -1,10 +1,16 @@
+import { loadEnv } from '../../config/env.js';
 import { logger } from '../../config/logger.js';
 import { updateBrand } from '../../db/repositories/brands.js';
+import type { IgAnalysisSnapshot } from '../../db/schema.js';
 import { pickOk, runParallel } from '../../mastra/onboarding/parallel.js';
 import {
   fetchInstagramProfile,
   InstagramScraperError,
 } from '../apify/instagramScraper.js';
+import {
+  captureInstagramGrid,
+  IgGridCaptureError,
+} from '../instagram/captureGrid.js';
 import { analyzeInstagramVisuals } from './analyzeVisuals.js';
 import { analyzeInstagramVoice } from './analyzeVoice.js';
 import { synthesizeBrandKit } from './synthesizeBrandKit.js';
@@ -90,16 +96,40 @@ export async function analyzeBrand(input: {
     };
   }
 
+  const env = loadEnv();
   const imageUrls = scrape.posts.map((p) => p.imageUrl);
   const captions = scrape.posts.map((p) => p.caption);
   log.info(
-    { postCount: scrape.posts.length, imageCount: imageUrls.length },
+    {
+      postCount: scrape.posts.length,
+      imageCount: imageUrls.length,
+      gridEnabled: env.IG_GRID_CAPTURE_ENABLED,
+    },
     'Sending full IG grid to analyzers',
   );
 
-  // Fan-out: run the visual + voice analyzers in parallel as named subtasks
-  // of the brand-kit step. Adding a future analyzer (e.g. a Playwright grid
-  // screenshot or a competitor-scrape) is a one-line addition here.
+  // Layer 1 — Playwright grid capture (visuals input, if enabled).
+  // Voice analysis is unaffected: we still feed it Apify captions + bio.
+  // On any IgGridCaptureError we log and let the visual analyzer fall back
+  // to today's behaviour (the Apify post images), so brand analysis never
+  // fails just because Playwright did.
+  let gridCapture: Awaited<ReturnType<typeof captureInstagramGrid>> | null = null;
+  if (env.IG_GRID_CAPTURE_ENABLED) {
+    try {
+      gridCapture = await captureInstagramGrid({
+        brandId: input.brandId,
+        handle: scrape.profile.username,
+      });
+    } catch (err) {
+      const code = err instanceof IgGridCaptureError ? err.code : 'unknown';
+      log.warn(
+        { err, phase: 'ig.grid.fallback', reason: code },
+        'IG grid capture failed; falling back to Apify post images',
+      );
+    }
+  }
+
+  // Layer 2 — visual + voice analyzers (always parallel).
   type AnalyzerOutput =
     | Awaited<ReturnType<typeof analyzeInstagramVisuals>>
     | Awaited<ReturnType<typeof analyzeInstagramVoice>>;
@@ -108,11 +138,22 @@ export async function analyzeBrand(input: {
       {
         name: 'visuals',
         run: () =>
-          analyzeInstagramVisuals({
-            handle: input.handle,
-            imageUrls,
-            ...(input.brandHint ? { brandHint: input.brandHint } : {}),
-          }),
+          gridCapture
+            ? analyzeInstagramVisuals({
+                handle: input.handle,
+                source: 'grid',
+                viewportShotUrls: gridCapture.viewportShotUrls,
+                ...(gridCapture.profilePicUrl
+                  ? { profilePicUrl: gridCapture.profilePicUrl }
+                  : {}),
+                ...(input.brandHint ? { brandHint: input.brandHint } : {}),
+              })
+            : analyzeInstagramVisuals({
+                handle: input.handle,
+                source: 'posts',
+                imageUrls,
+                ...(input.brandHint ? { brandHint: input.brandHint } : {}),
+              }),
       },
       {
         name: 'voice',
@@ -159,7 +200,21 @@ export async function analyzeBrand(input: {
     };
   }
 
-  const synthesized = synthesizeBrandKit({ scrape, visuals, voice });
+  const gridCaptureMeta: IgAnalysisSnapshot['gridCapture'] | undefined = gridCapture
+    ? {
+        ...(gridCapture.profilePicUrl ? { profilePicUrl: gridCapture.profilePicUrl } : {}),
+        viewportShotUrls: gridCapture.viewportShotUrls,
+        capturedAt: gridCapture.capturedAt,
+        source: 'playwright',
+      }
+    : undefined;
+
+  const synthesized = synthesizeBrandKit({
+    scrape,
+    visuals,
+    voice,
+    ...(gridCaptureMeta ? { gridCapture: gridCaptureMeta } : {}),
+  });
 
   await updateBrand(input.brandId, {
     igHandle: scrape.profile.username,

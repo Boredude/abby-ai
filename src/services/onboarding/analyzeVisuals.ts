@@ -5,14 +5,24 @@ import { loadEnv } from '../../config/env.js';
 import { logger } from '../../config/logger.js';
 
 /**
- * Visual analysis of an Instagram brand. We feed every post image we have for
- * the IG grid (typically 12 — Apify's `details` mode returns the most recent
- * 12 posts) into a single multi-image vision call and ask Claude Sonnet to
- * extract a brand kit (color palette, typography mood) plus a design system
- * summary.
+ * Visual analysis of an Instagram brand.
  *
- * The hard cap exists only as a defensive guard against accidental input
- * blow-ups; in practice the scraper returns ~12.
+ * Two input shapes are supported:
+ *
+ *  - `source: 'grid'`  — viewport screenshots taken by our headless Chromium
+ *    grid-capture worker (each shot shows ~12 tiles in their grid context),
+ *    plus an optional avatar. Preferred when available; gives the model a
+ *    truer sense of the brand than individual post crops.
+ *
+ *  - `source: 'posts'` — original behaviour: individual post images returned
+ *    by Apify's `details` scrape. Used as a fallback when grid capture is
+ *    disabled or fails.
+ *
+ * Both branches converge on the same Claude vision call + zod schema, so the
+ * downstream `synthesizeBrandKit` shape is unchanged.
+ *
+ * The hard cap exists as a defensive guard against accidental input
+ * blow-ups; in practice we send ~12 (post fallback) or ~10–15 (grid).
  */
 
 const MAX_IMAGES = 24;
@@ -62,24 +72,64 @@ const visualAnalysisSchema = z.object({
 
 export type VisualAnalysis = z.infer<typeof visualAnalysisSchema>;
 
-export type AnalyzeVisualsInput = {
-  handle: string;
-  imageUrls: string[];
-  brandHint?: string;
-};
+export type AnalyzeVisualsInput =
+  | {
+      handle: string;
+      source: 'posts';
+      imageUrls: string[];
+      brandHint?: string;
+    }
+  | {
+      handle: string;
+      source: 'grid';
+      /** Viewport screenshots from the headless Chromium grid capture. */
+      viewportShotUrls: string[];
+      /** Optional avatar image URL captured alongside the grid. */
+      profilePicUrl?: string;
+      brandHint?: string;
+    };
 
-const SYSTEM_PROMPT = `
+const SYSTEM_PROMPT_POSTS = `
 You are a senior brand designer auditing an Instagram feed.
 Look at every image carefully and synthesize a coherent visual brand identity.
 Be specific and actionable — this output will be used to generate future on-brand visuals.
 Use concrete adjectives, not corporate fluff. Never invent colors or motifs that aren't actually in the images.
 `.trim();
 
+const SYSTEM_PROMPT_GRID = `
+You are a senior brand designer auditing an Instagram feed.
+
+The images you are about to see are SCREENSHOTS of the brand's Instagram profile page,
+captured at viewport size as we scroll down the grid. Each screenshot therefore shows
+multiple post tiles arranged in their actual on-feed layout (typically a 3-column grid),
+plus the surrounding chrome (header, bio, action bar). When an avatar image is included
+it will be a single, smaller square shown separately from the grid screenshots.
+
+Reason about the brand by treating each screenshot as a slice of the grid. Pay special
+attention to how the tiles relate to each other — recurring colors, consistent crop
+ratios, typographic motifs, repeated subject matter, the rhythm between text-heavy and
+photo-heavy posts. Ignore Instagram chrome (icons, follower counts, "Follow" buttons,
+the profile header) when extracting the brand identity.
+
+Be specific and actionable — this output will be used to generate future on-brand visuals.
+Use concrete adjectives, not corporate fluff. Never invent colors or motifs that aren't
+actually visible in the screenshots.
+`.trim();
+
 export async function analyzeInstagramVisuals(input: AnalyzeVisualsInput): Promise<VisualAnalysis> {
   const env = loadEnv();
-  const log = logger.child({ analyzer: 'visuals', handle: input.handle });
+  const log = logger.child({ analyzer: 'visuals', handle: input.handle, source: input.source });
 
-  const urls = input.imageUrls.slice(0, MAX_IMAGES);
+  // Collect the list of URLs to download in priority order. For the grid
+  // path the avatar (if present) goes last so it doesn't crowd out the grid
+  // shots when we hit MAX_IMAGES; for the posts path we send what we have.
+  const urls: string[] =
+    input.source === 'grid'
+      ? [
+          ...input.viewportShotUrls,
+          ...(input.profilePicUrl ? [input.profilePicUrl] : []),
+        ].slice(0, MAX_IMAGES)
+      : input.imageUrls.slice(0, MAX_IMAGES);
   if (urls.length === 0) {
     throw new Error('analyzeInstagramVisuals: no image URLs provided');
   }
@@ -109,14 +159,23 @@ export async function analyzeInstagramVisuals(input: AnalyzeVisualsInput): Promi
     'Running visual analysis',
   );
 
+  const description =
+    input.source === 'grid'
+      ? `I'm sending you ${images.length} viewport screenshots of the brand's Instagram profile page in scroll order${
+          input.profilePicUrl ? ' (the last image is the avatar)' : ''
+        }.`
+      : `I'm sending you ${images.length} recent Instagram posts in order.`;
+
   const userText = [
     `Brand handle: @${input.handle}`,
     input.brandHint ? `Owner-provided context: ${input.brandHint}` : '',
-    `I'm sending you ${images.length} recent Instagram posts in order.`,
+    description,
     'Extract the brand kit + design system that ties them together.',
   ]
     .filter(Boolean)
     .join('\n');
+
+  const system = input.source === 'grid' ? SYSTEM_PROMPT_GRID : SYSTEM_PROMPT_POSTS;
 
   const { object } = await generateObject({
     model: anthropic(modelId),
@@ -134,7 +193,7 @@ export async function analyzeInstagramVisuals(input: AnalyzeVisualsInput): Promi
         ],
       },
     ],
-    system: SYSTEM_PROMPT,
+    system,
   });
 
   return object;

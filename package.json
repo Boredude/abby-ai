@@ -19,6 +19,8 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:studio": "drizzle-kit studio",
     "reset-brand": "tsx src/scripts/resetBrand.ts",
+    "ig:bootstrap": "tsx src/scripts/bootstrapIgSession.ts",
+    "ig:verify": "tsx src/scripts/verifyIgSession.ts",
     "deploy": "railway up"
   },
   "dependencies": {
@@ -40,6 +42,7 @@
     "pg-boss": "^12.17.0",
     "pino": "^9.5.0",
     "pino-pretty": "^13.0.0",
+    "playwright": "^1.59.1",
     "zod": "^3.25.0"
   },
   "devDependencies": {

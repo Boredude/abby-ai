@@ -101,6 +101,27 @@ describe('synthesizeBrandKit', () => {
     expect(typeof out.igAnalysis.capturedAt).toBe('string');
   });
 
+  it('passes gridCapture metadata through to the snapshot when provided', () => {
+    const gridCapture = {
+      profilePicUrl: 'https://r2.example/profile.jpg',
+      viewportShotUrls: [
+        'https://r2.example/v00.png',
+        'https://r2.example/v01.png',
+      ],
+      capturedAt: '2026-04-27T22:00:00.000Z',
+      source: 'playwright' as const,
+    };
+
+    const out = synthesizeBrandKit({ scrape, visuals, voice, gridCapture });
+
+    expect(out.igAnalysis.gridCapture).toEqual(gridCapture);
+  });
+
+  it('omits gridCapture from the snapshot when not provided', () => {
+    const out = synthesizeBrandKit({ scrape, visuals, voice });
+    expect(out.igAnalysis.gridCapture).toBeUndefined();
+  });
+
   it('omits optional profile fields that are undefined', () => {
     const minimalScrape: InstagramScrapeResult = {
       profile: {

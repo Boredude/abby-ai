@@ -24,6 +24,28 @@ const schema = z.object({
 
   APIFY_TOKEN: z.string().min(1, 'APIFY_TOKEN is required'),
 
+  // ---- Instagram Playwright grid-capture (feature-flagged) ----
+  // When false, the brand-analysis pipeline behaves exactly as today: visual
+  // analysis runs against Apify post images. When true, we additionally run a
+  // headless Chromium logged in as Duffy's IG account to screenshot the
+  // brand's grid in viewport-sized chunks; the visual analyzer consumes those
+  // screenshots, with the Apify post-images path used as a fallback.
+  IG_GRID_CAPTURE_ENABLED: z
+    .string()
+    .optional()
+    .default('false')
+    .transform((v) => v === 'true' || v === '1'),
+  // Bootstrap-only credentials. The runtime never logs in unattended; these
+  // are consumed by `src/scripts/bootstrapIgSession.ts` once to seed an
+  // `ig_sessions` row, then production reuses the persisted storageState.
+  IG_DUFFY_USERNAME: z.string().optional(),
+  IG_DUFFY_PASSWORD: z.string().optional(),
+  IG_GRID_TARGET_POSTS: z.coerce.number().int().positive().default(120),
+  IG_GRID_VIEWPORT_WIDTH: z.coerce.number().int().positive().default(1280),
+  IG_GRID_VIEWPORT_HEIGHT: z.coerce.number().int().positive().default(1600),
+  IG_GRID_MAX_SCROLLS: z.coerce.number().int().positive().default(15),
+  IG_GRID_TIMEOUT_MS: z.coerce.number().int().positive().default(90_000),
+
   R2_ACCOUNT_ID: z.string().min(1, 'R2_ACCOUNT_ID is required'),
   R2_ACCESS_KEY_ID: z.string().min(1, 'R2_ACCESS_KEY_ID is required'),
   R2_SECRET_ACCESS_KEY: z.string().min(1, 'R2_SECRET_ACCESS_KEY is required'),

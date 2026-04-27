@@ -17,6 +17,12 @@ export type SynthesizeInput = {
   scrape: InstagramScrapeResult;
   visuals: VisualAnalysis;
   voice: VoiceAnalysis;
+  /**
+   * Optional Playwright grid-capture metadata. Pass-through into the
+   * `igAnalysis` snapshot for traceability of which image set the visual
+   * analyzer consumed.
+   */
+  gridCapture?: NonNullable<IgAnalysisSnapshot['gridCapture']>;
 };
 
 export type SynthesizedBrand = {
@@ -27,7 +33,7 @@ export type SynthesizedBrand = {
 };
 
 export function synthesizeBrandKit(input: SynthesizeInput): SynthesizedBrand {
-  const { scrape, visuals, voice } = input;
+  const { scrape, visuals, voice, gridCapture } = input;
 
   const brandKit: BrandKit = {
     palette: visuals.palette.map((p) => ({
@@ -100,6 +106,7 @@ export function synthesizeBrandKit(input: SynthesizeInput): SynthesizedBrand {
     })),
     rawVisuals: visuals,
     rawVoice: voice,
+    ...(gridCapture ? { gridCapture } : {}),
   };
 
   return { brandKit, designSystem, voice: persistedVoice, igAnalysis };

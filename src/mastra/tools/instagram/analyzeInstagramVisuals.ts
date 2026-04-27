@@ -37,6 +37,7 @@ export const analyzeInstagramVisualsTool = createTool({
   execute: async (inputData) => {
     return analyzeInstagramVisuals({
       handle: inputData.handle,
+      source: 'posts',
       imageUrls: inputData.imageUrls,
       ...(inputData.brandHint ? { brandHint: inputData.brandHint } : {}),
     });
