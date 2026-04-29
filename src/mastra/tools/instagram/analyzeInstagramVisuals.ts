@@ -3,13 +3,6 @@ import { z } from 'zod';
 import { analyzeInstagramVisuals } from '../../../services/onboarding/analyzeVisuals.js';
 
 const visualAnalysisOutput = z.object({
-  palette: z.array(
-    z.object({
-      hex: z.string(),
-      role: z.enum(['primary', 'secondary', 'accent', 'background', 'text', 'other']),
-      name: z.string().optional(),
-    }),
-  ),
   typographyMood: z.string(),
   photoStyle: z.string(),
   illustrationStyle: z.string(),
@@ -23,14 +16,14 @@ const visualAnalysisOutput = z.object({
 export const analyzeInstagramVisualsTool = createTool({
   id: 'analyzeInstagramVisuals',
   description:
-    "Analyzes an Instagram brand's visuals from up to 9 post images and returns a structured brand kit + design system (palette, typography mood, photo/illustration style, composition, lighting, recurring motifs, visual do/don't). Call this after fetchInstagramProfile, passing the post imageUrls in feed order.",
+    "Analyzes an Instagram brand's *post grid* visuals from the recent post images and returns a structured design system (typography mood, illustration style, photo style, composition, lighting, recurring motifs, visual do/don't). Color palette + logo come from analyzeInstagramProfilePic, not this tool. Call this after fetchInstagramProfile, passing the post imageUrls in feed order.",
   inputSchema: z.object({
     handle: z.string(),
     imageUrls: z
       .array(z.string().url())
       .min(1)
       .max(20)
-      .describe('Image URLs from recent posts. Up to the first 9 will be analyzed.'),
+      .describe('Image URLs from recent posts (typically 12). Up to 24 are accepted.'),
     brandHint: z.string().optional().describe('Optional extra context from the user.'),
   }),
   outputSchema: visualAnalysisOutput,

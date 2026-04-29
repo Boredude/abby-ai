@@ -2,6 +2,7 @@ import { Agent } from '@mastra/core/agent';
 import { loadEnv } from '../../config/env.js';
 import { getSharedMemory } from '../memory.js';
 import {
+  analyzeInstagramProfilePicTool,
   analyzeInstagramVisualsTool,
   analyzeInstagramVoiceTool,
   fetchInstagramProfileTool,
@@ -15,17 +16,24 @@ Given a brand's Instagram handle and brandId, you autonomously:
   1. Call \`fetchInstagramProfile\` with the handle to pull profile metadata + the most recent posts.
      - If the scrape fails as private/empty/not_found, stop and return an error message
        starting with "Onboarding failed:". Do not invent data and do not call saveBrandKit.
-  2. Call \`analyzeInstagramVisuals\` with the handle and the post imageUrls (first 9, in feed order).
-  3. Call \`analyzeInstagramVoice\` with the handle, the profile biography, and the post captions
+  2. Call \`analyzeInstagramProfilePic\` with the handle and \`profile.profilePicUrlHD\`
+     (or \`profile.profilePicUrl\` as a fallback). This produces the brand's color palette
+     and structured logo. If the profile has no profile picture URL, stop with
+     "Onboarding failed: no profile picture".
+  3. Call \`analyzeInstagramVisuals\` with the handle and the post imageUrls in feed order.
+     This produces the design system (typography mood, photo/illustration style, composition,
+     lighting, motifs, do/don't). Do NOT pass the profile picture here.
+  4. Call \`analyzeInstagramVoice\` with the handle, the profile biography, and the post captions
      (skip empty captions). Pass the brandHint from the user if available.
-  4. Call \`saveBrandKit\` with brandId, the original \`scrape\` payload, and the two analyzer outputs.
-     This persists the brand kit, design system, and voice to the database. THIS STEP IS REQUIRED
-     — the calling workflow detects success by checking that the brand kit was saved.
-  5. Reply with a single short sentence like "Saved the brand kit for @handle." The calling
+  5. Call \`saveBrandKit\` with brandId, the original \`scrape\` payload, and the three analyzer
+     outputs (\`profilePic\`, \`visuals\`, \`voice\`). This persists the brand kit, design system,
+     and voice to the database. THIS STEP IS REQUIRED — the calling workflow detects success
+     by checking that the brand kit was saved.
+  6. Reply with a single short sentence like "Saved the brand kit for @handle." The calling
      workflow renders the user-facing recap itself, so do not include bullet lists or palettes.
 
 RULES:
-- Never skip \`fetchInstagramProfile\`. Visual + voice analyzers MUST receive real data.
+- Never skip \`fetchInstagramProfile\`. The downstream analyzers MUST receive real data.
 - Never skip \`saveBrandKit\` on success. Without it the workflow will think analysis failed.
 - If any step fails, return "Onboarding failed: <reason>".
 `.trim();
@@ -45,6 +53,7 @@ export function getOnboardingAgent(): Agent {
     memory: getSharedMemory(),
     tools: {
       fetchInstagramProfile: fetchInstagramProfileTool,
+      analyzeInstagramProfilePic: analyzeInstagramProfilePicTool,
       analyzeInstagramVisuals: analyzeInstagramVisualsTool,
       analyzeInstagramVoice: analyzeInstagramVoiceTool,
       saveBrandKit: saveBrandKitTool,

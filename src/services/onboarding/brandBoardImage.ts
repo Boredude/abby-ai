@@ -65,8 +65,10 @@ export function buildBrandBoardPrompt(brand: Brand): string {
     lines.push(`Caption under the voice tags: "Audience: ${truncate(voice.audience, 100)}".`);
   }
 
-  if (kit?.logoNotes) {
-    lines.push(`Logo / mark note (small text in a corner): "${truncate(kit.logoNotes, 120)}".`);
+  if (kit?.logo && kit.logo.markType !== 'none') {
+    const tagline = kit.logo.hasTagline ? ' (with a small tagline)' : '';
+    const note = `${kit.logo.markType} — ${kit.logo.description}${tagline}`;
+    lines.push(`Logo / mark note (small text in a corner): "${truncate(note, 120)}".`);
   }
 
   lines.push(

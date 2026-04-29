@@ -5,6 +5,7 @@ import {
   fetchInstagramProfile,
   InstagramScraperError,
 } from '../apify/instagramScraper.js';
+import { analyzeInstagramProfilePic } from './analyzeProfilePic.js';
 import { analyzeInstagramVisuals } from './analyzeVisuals.js';
 import { analyzeInstagramVoice } from './analyzeVoice.js';
 import { synthesizeBrandKit } from './synthesizeBrandKit.js';
@@ -92,19 +93,48 @@ export async function analyzeBrand(input: {
 
   const imageUrls = scrape.posts.map((p) => p.imageUrl);
   const captions = scrape.posts.map((p) => p.caption);
+  const profilePicUrl = scrape.profile.profilePicUrlHD ?? scrape.profile.profilePicUrl;
   log.info(
-    { postCount: scrape.posts.length, imageCount: imageUrls.length },
+    {
+      postCount: scrape.posts.length,
+      imageCount: imageUrls.length,
+      hasProfilePic: Boolean(profilePicUrl),
+    },
     'Sending full IG grid to analyzers',
   );
 
-  // Fan-out: run the visual + voice analyzers in parallel as named subtasks
-  // of the brand-kit step. Adding a future analyzer (e.g. a Playwright grid
-  // screenshot or a competitor-scrape) is a one-line addition here.
+  // Profile pic is the source of palette + logo; without it we can't build a
+  // brand kit, so fail fast with the same `empty` reason the scraper itself
+  // would surface for an account with no usable content.
+  if (!profilePicUrl) {
+    log.warn('Instagram scrape returned no profile picture URL');
+    return {
+      ok: false,
+      handle: input.handle,
+      reason: 'empty',
+      message: 'Instagram profile has no profile picture; cannot derive palette / logo.',
+    };
+  }
+
+  // Fan-out: run the profile-pic + post-grid + voice analyzers in parallel
+  // as named subtasks of the brand-kit step. Adding a future analyzer (e.g.
+  // a Playwright grid screenshot or a competitor-scrape) is a one-line
+  // addition here.
   type AnalyzerOutput =
+    | Awaited<ReturnType<typeof analyzeInstagramProfilePic>>
     | Awaited<ReturnType<typeof analyzeInstagramVisuals>>
     | Awaited<ReturnType<typeof analyzeInstagramVoice>>;
   const fanout = await runParallel<AnalyzerOutput>(
     [
+      {
+        name: 'profilePic',
+        run: () =>
+          analyzeInstagramProfilePic({
+            handle: input.handle,
+            profilePicUrl,
+            ...(input.brandHint ? { brandHint: input.brandHint } : {}),
+          }),
+      },
       {
         name: 'visuals',
         run: () =>
@@ -143,14 +173,17 @@ export async function analyzeBrand(input: {
     };
   }
 
+  const profilePic = pickOk(fanout, 'profilePic') as
+    | Awaited<ReturnType<typeof analyzeInstagramProfilePic>>
+    | undefined;
   const visuals = pickOk(fanout, 'visuals') as
     | Awaited<ReturnType<typeof analyzeInstagramVisuals>>
     | undefined;
   const voice = pickOk(fanout, 'voice') as
     | Awaited<ReturnType<typeof analyzeInstagramVoice>>
     | undefined;
-  if (!visuals || !voice) {
-    log.error('Brand analysis fan-out missing visuals or voice');
+  if (!profilePic || !visuals || !voice) {
+    log.error('Brand analysis fan-out missing profilePic, visuals, or voice');
     return {
       ok: false,
       handle: input.handle,
@@ -159,7 +192,7 @@ export async function analyzeBrand(input: {
     };
   }
 
-  const synthesized = synthesizeBrandKit({ scrape, visuals, voice });
+  const synthesized = synthesizeBrandKit({ scrape, profilePic, visuals, voice });
 
   await updateBrand(input.brandId, {
     igHandle: scrape.profile.username,

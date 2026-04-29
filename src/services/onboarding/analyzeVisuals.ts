@@ -3,13 +3,20 @@ import { generateObject } from 'ai';
 import { z } from 'zod';
 import { loadEnv } from '../../config/env.js';
 import { logger } from '../../config/logger.js';
+import { downloadImage, stripGatewayPrefix } from './visionImage.js';
 
 /**
- * Visual analysis of an Instagram brand. We feed every post image we have for
- * the IG grid (typically 12 — Apify's `details` mode returns the most recent
- * 12 posts) into a single multi-image vision call and ask Claude Sonnet to
- * extract a brand kit (color palette, typography mood) plus a design system
- * summary.
+ * Visual analysis of an Instagram brand's *post grid*. We feed every post
+ * image we have for the IG grid (typically 12 — Apify's `details` mode
+ * returns the most recent 12 posts) into a single multi-image vision call
+ * and ask Claude Sonnet to extract the design system the posts share:
+ * typography mood, illustration style, photo style, composition, lighting,
+ * recurring motifs, and visual do's / don'ts.
+ *
+ * The brand's color palette and logo are intentionally NOT extracted here —
+ * they come from the profile-picture analyzer (`analyzeProfilePic.ts`)
+ * because the avatar is the most reliable source for the brand's mark and
+ * core color story.
  *
  * The hard cap exists only as a defensive guard against accidental input
  * blow-ups; in practice the scraper returns ~12.
@@ -17,29 +24,10 @@ import { logger } from '../../config/logger.js';
 
 const MAX_IMAGES = 24;
 
-const paletteEntrySchema = z.object({
-  hex: z
-    .string()
-    .regex(/^#?[0-9a-fA-F]{6}$/u)
-    .describe('A 6-digit hex color sampled from the brand visuals.')
-    .transform((v) => (v.startsWith('#') ? v.toLowerCase() : `#${v.toLowerCase()}`)),
-  role: z
-    .enum(['primary', 'secondary', 'accent', 'background', 'text', 'other'])
-    .describe('Functional role of this color in the brand.'),
-  name: z
-    .string()
-    .max(40)
-    .optional()
-    .describe('Optional human-friendly name (e.g. "warm sand", "deep navy").'),
-});
-
 // NOTE: Anthropic's structured-output mode rejects `minItems`/`maxItems` > 1,
 // so we keep array sizes free in the schema and steer counts via descriptions
 // + the prompt instead.
 const visualAnalysisSchema = z.object({
-  palette: z
-    .array(paletteEntrySchema)
-    .describe('3 to 7 dominant colors that define the brand on Instagram.'),
   typographyMood: z
     .string()
     .describe('Short description of the typographic feel (serif/sans, weight, tone), 10–200 chars.'),
@@ -70,9 +58,11 @@ export type AnalyzeVisualsInput = {
 
 const SYSTEM_PROMPT = `
 You are a senior brand designer auditing an Instagram feed.
-Look at every image carefully and synthesize a coherent visual brand identity.
+Look at every image carefully and synthesize the coherent design system that ties the grid together.
+Focus on typography mood, illustration style, photo style, composition, lighting, recurring motifs, and concrete do/don't guidelines.
+Do NOT extract a color palette or logo — those come from a separate pass on the profile picture.
 Be specific and actionable — this output will be used to generate future on-brand visuals.
-Use concrete adjectives, not corporate fluff. Never invent colors or motifs that aren't actually in the images.
+Use concrete adjectives, not corporate fluff. Never invent motifs that aren't actually in the images.
 `.trim();
 
 export async function analyzeInstagramVisuals(input: AnalyzeVisualsInput): Promise<VisualAnalysis> {
@@ -113,7 +103,7 @@ export async function analyzeInstagramVisuals(input: AnalyzeVisualsInput): Promi
     `Brand handle: @${input.handle}`,
     input.brandHint ? `Owner-provided context: ${input.brandHint}` : '',
     `I'm sending you ${images.length} recent Instagram posts in order.`,
-    'Extract the brand kit + design system that ties them together.',
+    'Extract the design system that ties them together (typography mood, illustration style, photo style, composition, lighting, motifs, do/don\'t).',
   ]
     .filter(Boolean)
     .join('\n');
@@ -138,47 +128,4 @@ export async function analyzeInstagramVisuals(input: AnalyzeVisualsInput): Promi
   });
 
   return object;
-}
-
-/**
- * Download an image and return the raw bytes + the MIME type to declare to
- * the model. Anthropic accepts jpeg/png/gif/webp; if the server doesn't tell
- * us a usable type, we fall back to image/jpeg (which is what IG's CDN
- * actually serves).
- */
-async function downloadImage(url: string): Promise<{ bytes: Uint8Array; mediaType: string }> {
-  const res = await fetch(url, {
-    headers: {
-      // IG CDN sometimes returns 403 without a browsery UA / referer.
-      'user-agent':
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
-      accept: 'image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8,*/*;q=0.5',
-      referer: 'https://www.instagram.com/',
-    },
-  });
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} fetching image`);
-  }
-  const buf = new Uint8Array(await res.arrayBuffer());
-  const ct = (res.headers.get('content-type') ?? '').toLowerCase();
-  const mediaType =
-    ct.startsWith('image/jpeg') || ct.startsWith('image/jpg')
-      ? 'image/jpeg'
-      : ct.startsWith('image/png')
-        ? 'image/png'
-        : ct.startsWith('image/webp')
-          ? 'image/webp'
-          : ct.startsWith('image/gif')
-            ? 'image/gif'
-            : 'image/jpeg';
-  return { bytes: buf, mediaType };
-}
-
-/**
- * Mastra model ids look like "anthropic/claude-sonnet-4-5"; the AI SDK's
- * `anthropic(...)` factory just wants the bare model id.
- */
-function stripGatewayPrefix(modelId: string): string {
-  const idx = modelId.indexOf('/');
-  return idx >= 0 ? modelId.slice(idx + 1) : modelId;
 }
