@@ -1,10 +1,12 @@
 import type {
   BrandDesignSystem,
   BrandKit,
+  BrandLogo,
   BrandVoice,
   IgAnalysisSnapshot,
 } from '../../db/schema.js';
 import type { InstagramScrapeResult } from '../apify/instagramScraper.js';
+import type { ProfilePicAnalysis } from './analyzeProfilePic.js';
 import type { VisualAnalysis } from './analyzeVisuals.js';
 import type { VoiceAnalysis } from './analyzeVoice.js';
 
@@ -15,6 +17,7 @@ import type { VoiceAnalysis } from './analyzeVoice.js';
 
 export type SynthesizeInput = {
   scrape: InstagramScrapeResult;
+  profilePic: ProfilePicAnalysis;
   visuals: VisualAnalysis;
   voice: VoiceAnalysis;
 };
@@ -27,15 +30,26 @@ export type SynthesizedBrand = {
 };
 
 export function synthesizeBrandKit(input: SynthesizeInput): SynthesizedBrand {
-  const { scrape, visuals, voice } = input;
+  const { scrape, profilePic, visuals, voice } = input;
+
+  const profilePicUrl = scrape.profile.profilePicUrlHD ?? scrape.profile.profilePicUrl;
+
+  const logo: BrandLogo = {
+    markType: profilePic.logo.markType,
+    description: profilePic.logo.description,
+    colors: profilePic.logo.colors,
+    hasTagline: profilePic.logo.hasTagline,
+    ...(profilePicUrl ? { profilePicUrl } : {}),
+  };
 
   const brandKit: BrandKit = {
-    palette: visuals.palette.map((p) => ({
+    palette: profilePic.palette.map((p) => ({
       hex: p.hex,
       role: p.role,
       ...(p.name ? { name: p.name } : {}),
     })),
     typography: { mood: visuals.typographyMood },
+    logo,
   };
 
   const designSystem: BrandDesignSystem = {
@@ -100,6 +114,7 @@ export function synthesizeBrandKit(input: SynthesizeInput): SynthesizedBrand {
     })),
     rawVisuals: visuals,
     rawVoice: voice,
+    rawProfilePic: profilePic,
   };
 
   return { brandKit, designSystem, voice: persistedVoice, igAnalysis };

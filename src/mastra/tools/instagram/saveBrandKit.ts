@@ -34,7 +34,7 @@ const postInputSchema = z.object({
   mentions: z.array(z.string()).optional(),
 });
 
-const visualsInputSchema = z.object({
+const profilePicInputSchema = z.object({
   palette: z.array(
     z.object({
       hex: z.string(),
@@ -42,6 +42,15 @@ const visualsInputSchema = z.object({
       name: z.string().optional(),
     }),
   ),
+  logo: z.object({
+    markType: z.enum(['wordmark', 'symbol', 'combo', 'monogram', 'none']),
+    description: z.string(),
+    colors: z.array(z.string()),
+    hasTagline: z.boolean(),
+  }),
+});
+
+const visualsInputSchema = z.object({
   typographyMood: z.string(),
   photoStyle: z.string(),
   illustrationStyle: z.string(),
@@ -67,13 +76,14 @@ const voiceInputSchema = z.object({
 export const saveBrandKitTool = createTool({
   id: 'saveBrandKit',
   description:
-    'Synthesizes the visual + voice analyses with the raw Instagram scrape into a brand kit, design system, and voice guide, and persists them to the brand record. Call this once analyses are complete and before reporting back to the user.',
+    'Synthesizes the profile-pic + visual + voice analyses with the raw Instagram scrape into a brand kit, design system, and voice guide, and persists them to the brand record. Call this once all three analyses are complete and before reporting back to the user.',
   inputSchema: z.object({
     brandId: z.string().describe('UUID of the brand to update.'),
     scrape: z.object({
       profile: profileInputSchema,
       posts: z.array(postInputSchema),
     }),
+    profilePic: profilePicInputSchema,
     visuals: visualsInputSchema,
     voice: voiceInputSchema,
   }),
@@ -86,6 +96,7 @@ export const saveBrandKitTool = createTool({
   execute: async (inputData) => {
     const synthesized = synthesizeBrandKit({
       scrape: inputData.scrape,
+      profilePic: inputData.profilePic,
       visuals: inputData.visuals,
       voice: inputData.voice,
     });

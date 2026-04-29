@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { synthesizeBrandKit } from '../../src/services/onboarding/synthesizeBrandKit.js';
 import type { InstagramScrapeResult } from '../../src/services/apify/instagramScraper.js';
+import type { ProfilePicAnalysis } from '../../src/services/onboarding/analyzeProfilePic.js';
 import type { VisualAnalysis } from '../../src/services/onboarding/analyzeVisuals.js';
 import type { VoiceAnalysis } from '../../src/services/onboarding/analyzeVoice.js';
 
@@ -45,12 +46,21 @@ const scrape: InstagramScrapeResult = {
   ],
 };
 
-const visuals: VisualAnalysis = {
+const profilePic: ProfilePicAnalysis = {
   palette: [
     { hex: '#1a1a1a', role: 'primary', name: 'soft black' },
     { hex: '#f5f0e6', role: 'background', name: 'warm sand' },
     { hex: '#c64f3a', role: 'accent', name: 'sun-faded brick' },
   ],
+  logo: {
+    markType: 'wordmark',
+    description: 'Sans-serif "HONY" wordmark in cream on a charcoal square.',
+    colors: ['#1a1a1a', '#f5f0e6'],
+    hasTagline: false,
+  },
+};
+
+const visuals: VisualAnalysis = {
   typographyMood: 'A grounded, classic serif paired with quiet captions.',
   photoStyle: 'Documentary portraits, candid eye contact, natural light.',
   illustrationStyle: 'No illustrations — purely photographic.',
@@ -75,11 +85,17 @@ const voice: VoiceAnalysis = {
 
 describe('synthesizeBrandKit', () => {
   it('produces brand kit, design system, voice, and snapshot', () => {
-    const out = synthesizeBrandKit({ scrape, visuals, voice });
+    const out = synthesizeBrandKit({ scrape, profilePic, visuals, voice });
 
     expect(out.brandKit.palette).toHaveLength(3);
     expect(out.brandKit.palette[0]).toMatchObject({ hex: '#1a1a1a', role: 'primary' });
     expect(out.brandKit.typography.mood).toContain('serif');
+    expect(out.brandKit.logo).toMatchObject({
+      markType: 'wordmark',
+      description: profilePic.logo.description,
+      hasTagline: false,
+      profilePicUrl: 'https://example.com/p_hd.jpg',
+    });
 
     expect(out.designSystem.photoStyle).toMatch(/Documentary/);
     expect(out.designSystem.recurringMotifs).toContain('portraits');
@@ -98,6 +114,7 @@ describe('synthesizeBrandKit', () => {
     expect(out.igAnalysis.posts[1]?.type).toBe('reel');
     expect(out.igAnalysis.rawVisuals).toEqual(visuals);
     expect(out.igAnalysis.rawVoice).toEqual(voice);
+    expect(out.igAnalysis.rawProfilePic).toEqual(profilePic);
     expect(typeof out.igAnalysis.capturedAt).toBe('string');
   });
 
@@ -120,10 +137,11 @@ describe('synthesizeBrandKit', () => {
       ],
     };
 
-    const out = synthesizeBrandKit({ scrape: minimalScrape, visuals, voice });
+    const out = synthesizeBrandKit({ scrape: minimalScrape, profilePic, visuals, voice });
 
     expect(out.igAnalysis.handle).toBe('minimal');
     expect(out.igAnalysis.profile.followers).toBeUndefined();
     expect(out.igAnalysis.profile.profilePicUrl).toBeUndefined();
+    expect(out.brandKit.logo?.profilePicUrl).toBeUndefined();
   });
 });

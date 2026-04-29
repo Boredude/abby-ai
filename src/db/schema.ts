@@ -214,13 +214,21 @@ export type BrandPaletteEntry = {
   name?: string;
 };
 
+export type BrandLogo = {
+  markType: 'wordmark' | 'symbol' | 'combo' | 'monogram' | 'none';
+  description: string;
+  colors: string[];
+  hasTagline: boolean;
+  profilePicUrl?: string;
+};
+
 export type BrandKit = {
   palette: BrandPaletteEntry[];
   typography: {
     mood: string;
     sample?: string;
   };
-  logoNotes?: string;
+  logo?: BrandLogo;
 };
 
 export type BrandDesignSystem = {
@@ -257,6 +265,7 @@ export type IgAnalysisSnapshot = {
   }>;
   rawVisuals?: unknown;
   rawVoice?: unknown;
+  rawProfilePic?: unknown;
 };
 
 // ---- Inferred row types ----
