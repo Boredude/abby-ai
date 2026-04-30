@@ -5,7 +5,6 @@ import type { Brand } from '../../../db/schema.js';
 import {
   fetchInstagramProfile,
   InstagramScraperError,
-  normalizeIgHandle,
   type InstagramScrapeResult,
 } from '../../../services/apify/instagramScraper.js';
 import { analyzeBrand } from '../../../services/onboarding/analyzeBrand.js';
@@ -14,12 +13,12 @@ import {
   buildBrandBoardCaption,
   generateBrandBoard,
 } from '../../../services/onboarding/brandBoardImage.js';
+import { classifyReviewIntent } from '../../../services/onboarding/classifyReviewIntent.js';
 import { extractHandleWithLLM } from '../../../services/onboarding/extractHandle.js';
 import {
   REVIEW_PROMPT,
   RETRY_HANDLE_PROMPT,
   buildBrandKitRecap,
-  isExplicitApproval,
   looksLikeHandle,
 } from '../../../services/onboarding/recap.js';
 import { getDuffyAgent } from '../../agents/duffy.js';
@@ -414,44 +413,55 @@ async function executeBrandKit(ctx: OnboardingStepContext): Promise<OnboardingSt
     ctx.suspend({ question: 'brand_kit_review', mode: outcome });
   }
 
-  // Sub-state 3: brand kit exists — user is reviewing it.
-  if (isExplicitApproval(reply)) {
+  // Sub-state 3: brand kit exists — user is reviewing it. One LLM call
+  // disambiguates approve / new_handle / edit / unclear.
+  const intent = await classifyReviewIntent(reply, { currentHandle: brand.igHandle });
+
+  if (intent.intent === 'approve') {
     return { status: 'done' };
   }
 
-  // Reply looks like another handle → re-run analysis on the new handle.
-  if (looksLikeHandle(reply)) {
-    let newHandle = '';
-    try {
-      newHandle = normalizeIgHandle(reply);
-    } catch {
-      newHandle = '';
+  if (intent.intent === 'new_handle') {
+    await updateBrand(brandId, {
+      igHandle: intent.handle,
+      brandKitJson: null,
+      designSystemJson: null,
+      voiceJson: null,
+      igAnalysisJson: null,
+      websiteUrl: null,
+      awaitingWebsiteReply: false,
+    });
+    const outcome = await probeAndAnalyzeOrAskWebsite(brandId, intent.handle, channel);
+    if (outcome === 'awaiting_website') {
+      ctx.suspend({ question: 'website' });
     }
-    if (newHandle) {
-      await updateBrand(brandId, {
-        igHandle: newHandle,
-        brandKitJson: null,
-        designSystemJson: null,
-        voiceJson: null,
-        igAnalysisJson: null,
-        websiteUrl: null,
-        awaitingWebsiteReply: false,
-      });
-      const outcome = await probeAndAnalyzeOrAskWebsite(brandId, newHandle, channel);
-      if (outcome === 'awaiting_website') {
-        ctx.suspend({ question: 'website' });
-      }
-      ctx.suspend({ question: 'brand_kit_review', mode: outcome });
-    }
+    ctx.suspend({ question: 'brand_kit_review', mode: outcome });
   }
 
-  // Free-form edit feedback → let Duffy apply it.
+  if (intent.intent === 'unclear') {
+    await channel.sendText(
+      await phraseAsDuffy({
+        goal: "The user's reply during brand-kit review didn't clearly mean approve, a new handle, or a tweak. Ask them to clarify in one short line: lock it in, send a different handle, or tell you what to change.",
+        mustConvey:
+          'You did not understand whether they want to approve, try a different handle, or tweak the kit. Ask them to clarify.',
+        brandId,
+        context: { igHandle: brand.igHandle, userMessage: reply },
+        fallback:
+          "Sorry, I didn't quite catch that — reply YES to lock it in, send a different handle to try, or tell me what to tweak.",
+      }),
+    );
+    ctx.suspend({ question: 'brand_kit_review', mode: 'reviewing' });
+  }
+
+  // intent.intent === 'edit' → let Duffy apply the change. The classifier's
+  // editSummary is a clean paraphrase; fall back to the raw reply if absent.
   try {
     const duffy = getDuffyAgent();
     const prompt = [
       `[brandId=${brandId}]`,
       `The user reviewed the brand kit and wants to tweak something.`,
-      `Their feedback: "${reply}".`,
+      `Their feedback (paraphrased): "${intent.editSummary}".`,
+      `Original message: "${reply}".`,
       `Apply the change with updateBrandContext if it maps to voice/cadence/timezone.`,
       `Keep your reply short — confirm what changed in one sentence.`,
     ].join(' ');
@@ -481,10 +491,10 @@ export const brandKitStep: OnboardingStep = {
   isComplete(brand) {
     // The kit is only "done" once the user has explicitly approved it. We
     // don't have a dedicated approved flag, but the review-loop in
-    // executeBrandKit only returns `{ status: 'done' }` on explicit approval,
-    // and the workflow's progression past this step is the actual record of
+    // executeBrandKit only returns `{ status: 'done' }` on approval, and the
+    // workflow's progression past this step is the actual record of
     // approval. So idempotency here is conservative: only consider this step
-    // complete if the brand has moved beyond `onboarding` (e.g. the cadence
+    // complete if the brand has moved beyond `onboarding` (e.g. the timezone
     // step set it to `active`) AND a kit exists.
     return brand.brandKitJson !== null && brand.status !== 'pending' && brand.status !== 'onboarding';
   },

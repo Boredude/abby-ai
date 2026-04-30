@@ -85,7 +85,7 @@ Keep it accurate and minimal — it is in your context every turn.
 
 Maintain these fields:
 - \`activeOnboardingStepId\`: the stable id of the onboarding step in progress (e.g.
-  \`brand_kit\`, \`cadence_timezone\`). Set null/clear once the brand is active.
+  \`brand_kit\`, \`timezone\`). Set null/clear once the brand is active.
 - \`recentIntent\`: a one-line summary of what the user most recently asked for or
   signalled (max ~280 chars). Update when they state a new goal or change direction.
 - \`lastReviewArtifact\`: the artifact currently being reviewed (brand kit, post draft,

@@ -15,7 +15,7 @@ describe('brandOnboarding workflow shape', () => {
     // Adding/removing/reordering the plan should be reflected here.
     expect(stepIds).toEqual([
       'onboarding:brand_kit',
-      'onboarding:cadence_timezone',
+      'onboarding:timezone',
     ]);
   });
 });

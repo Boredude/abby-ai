@@ -1,6 +1,6 @@
 import type { OnboardingStep } from './types.js';
 import { brandKitStep } from './steps/brandKit.js';
-import { cadenceTimezoneStep } from './steps/cadenceTimezone.js';
+import { timezoneStep } from './steps/timezone.js';
 
 /**
  * The default onboarding plan, in execution order.
@@ -15,7 +15,7 @@ import { cadenceTimezoneStep } from './steps/cadenceTimezone.js';
  */
 export const DEFAULT_ONBOARDING_PLAN: readonly OnboardingStep[] = [
   brandKitStep,
-  cadenceTimezoneStep,
+  timezoneStep,
 ];
 
 export function findStepById(
