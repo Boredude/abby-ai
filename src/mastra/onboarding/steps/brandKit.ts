@@ -19,6 +19,7 @@ import {
   REVIEW_PROMPT,
   RETRY_HANDLE_PROMPT,
   buildBrandKitRecap,
+  isExplicitApproval,
   looksLikeHandle,
 } from '../../../services/onboarding/recap.js';
 import { getDuffyAgent } from '../../agents/duffy.js';
@@ -455,6 +456,20 @@ async function executeBrandKit(ctx: OnboardingStepContext): Promise<OnboardingSt
 
   // intent.intent === 'edit' → let Duffy apply the change. The classifier's
   // editSummary is a clean paraphrase; fall back to the raw reply if absent.
+
+  // Defense in depth: the classifier prompt biases toward "edit" when in
+  // doubt, so emphatic-but-shapeless approvals can land here with an
+  // editSummary that itself reads like a yes ("yes", "lock it in"). In that
+  // case we'd hand Duffy a non-existent tweak to apply, and she'd narrate
+  // her confusion at the user. Treat it as approval instead.
+  if (isExplicitApproval(intent.editSummary)) {
+    logger.info(
+      { brandId, reply, editSummary: intent.editSummary },
+      'Brand kit edit intent has an approval-shaped editSummary; upgrading to approve',
+    );
+    return { status: 'done' };
+  }
+
   try {
     const duffy = getDuffyAgent();
     const prompt = [

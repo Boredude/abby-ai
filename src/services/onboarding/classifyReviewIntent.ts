@@ -112,6 +112,16 @@ export async function classifyReviewIntent(
   const trimmed = reply?.trim();
   if (!trimmed) return { intent: 'unclear' };
 
+  // Fast path: clear, unambiguous approvals never need the LLM. This both
+  // saves a call and prevents the classifier's "when in doubt → edit" bias
+  // from swallowing emphatic confirmations like "Yess!!" or "yeahhh 🎉".
+  // `isExplicitApproval` already rejects mixed replies that contain a tweak
+  // verb or conjunction, so phrases like "yes but more playful" still hit
+  // the LLM and resolve to `edit`.
+  if (isExplicitApproval(trimmed)) {
+    return { intent: 'approve' };
+  }
+
   const env = loadEnv();
   const modelId = stripGatewayPrefix(env.DUFFY_ORCHESTRATOR_MODEL);
 

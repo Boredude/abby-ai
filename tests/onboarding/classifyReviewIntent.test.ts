@@ -93,10 +93,41 @@ describe('classifyReviewIntent', () => {
     expect(generateObjectMock).not.toHaveBeenCalled();
   });
 
-  it('falls back to isExplicitApproval (approve) when LLM throws', async () => {
-    generateObjectMock.mockRejectedValueOnce(new Error('rate limited'));
-    const result = await classifyReviewIntent('yes lock it in');
+  it.each([
+    'yes',
+    'Yes',
+    'YES',
+    'Yess!!',
+    'yesss',
+    'yeahhh',
+    'yup!',
+    'lock it in',
+    'perfect',
+    '👍',
+    '🎉',
+    'lgtm',
+  ])('fast-paths %s to approve without calling the LLM', async (input) => {
+    const result = await classifyReviewIntent(input);
     expect(result).toEqual({ intent: 'approve' });
+    expect(generateObjectMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'yes but more playful',
+    'perfect, swap the green for navy',
+    'yeah change the font',
+  ])('does NOT fast-path mixed reply %s; defers to LLM', async (input) => {
+    generateObjectMock.mockResolvedValueOnce({
+      object: {
+        intent: 'edit',
+        handle: null,
+        editSummary: 'mixed tweak',
+        reasoning: 'mixed reply',
+      },
+    });
+    const result = await classifyReviewIntent(input);
+    expect(result).toEqual({ intent: 'edit', editSummary: 'mixed tweak' });
+    expect(generateObjectMock).toHaveBeenCalledTimes(1);
   });
 
   it('falls back to unclear when LLM throws and reply is not an obvious approval', async () => {
@@ -107,13 +138,18 @@ describe('classifyReviewIntent', () => {
 
   it('passes the current handle to the LLM for context', async () => {
     generateObjectMock.mockResolvedValueOnce({
-      object: { intent: 'approve', handle: null, editSummary: null, reasoning: 'approved' },
+      object: {
+        intent: 'edit',
+        handle: null,
+        editSummary: 'palette tweak',
+        reasoning: 'asked for change',
+      },
     });
-    await classifyReviewIntent('yep', { currentHandle: 'ob.cocktails' });
+    await classifyReviewIntent('change the palette', { currentHandle: 'ob.cocktails' });
     const args = generateObjectMock.mock.calls[0]?.[0] as {
       messages: { role: string; content: string }[];
     };
     expect(args.messages[0]?.content).toContain('@ob.cocktails');
-    expect(args.messages[0]?.content).toContain('"yep"');
+    expect(args.messages[0]?.content).toContain('"change the palette"');
   });
 });

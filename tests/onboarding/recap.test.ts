@@ -78,6 +78,31 @@ describe('isExplicitApproval', () => {
     'perfect',
     'do it',
     'YES',
+    // Elongated / emphatic confirmations (the bug that motivated the fix).
+    'Yess!!',
+    'yess',
+    'YESSS',
+    'yes!!!',
+    'yeahhh',
+    'yepp',
+    'yup!',
+    'yas',
+    'yass!!',
+    'yay',
+    'okk',
+    'okayyy',
+    'perfectt',
+    "let's go",
+    'lgtm',
+    'lfg',
+    'approved',
+    'confirmed',
+    // Pure-emoji confirmations (WhatsApp users routinely just react with one).
+    '👍',
+    '🙌',
+    '🎉',
+    '👍👍',
+    '🔥',
   ])('treats %s as approval', (input) => {
     expect(isExplicitApproval(input)).toBe(true);
   });
@@ -89,6 +114,13 @@ describe('isExplicitApproval', () => {
     'no',
     "I'm not sure",
     '',
+    // Mixed-intent replies must NOT short-circuit to approve — they are edits.
+    'yes but more playful',
+    'perfect, but swap the green for navy',
+    'yeah change the font',
+    'yess swap the green',
+    'looks good but make it punchier',
+    'lock it in though tweak the audience',
   ])('does NOT treat %s as approval', (input) => {
     expect(isExplicitApproval(input)).toBe(false);
   });

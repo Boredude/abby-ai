@@ -63,16 +63,43 @@ export const REVIEW_PROMPT =
 export const RETRY_HANDLE_PROMPT =
   "Hmm, I couldn't read that account — make sure it's public and the handle is right. Send the handle again (without the @) and I'll retry.";
 
-/** True if the reply is an explicit, unambiguous approval. */
+// Short emoji-only confirmations (👍, 🙌🎉, etc.). Capped at 3 emojis so a
+// long emoji wall doesn't accidentally qualify as approval.
+const APPROVAL_EMOJI_RE =
+  /^\s*(?:👍|👌|🙌|🎉|💯|✅|🔒|🔥|🥰|🤩|❤️?){1,3}\s*$/u;
+
+// Approval tokens, with elongation tolerated on the short ones so emphatic
+// WhatsApp replies match (yess, yesss, yeahhh, yupp, okk, okayyy, ...).
+const APPROVAL_WORD_RE =
+  /\b(?:y+e+s+|y+e+p+|y+e+a+h+|y+u+p+|y+a+s+|y+a+y+|ok+(?:ay+)?|perfect+|great+|love\s+it|sounds\s+good|looks\s+good|do\s+it|lock(?:ed)?(?:\s+it)?(?:\s+in)?|confirm(?:ed)?|approve(?:d)?|lgtm|lfg|let'?s\s+go|go\s+for\s+it)\b/;
+
+// Negations always disqualify ("no", "not sure", "don't", ...).
+const NEGATION_RE = /\b(?:no|not|don'?t|nope|nah)\b/;
+
+// Mixed-intent markers: presence means the reply isn't a pure approval, even
+// if it contains an approval word. Covers conjunctions ("yes but more playful")
+// and tweak verbs ("yes swap the green", "perfect, make it punchier").
+const MIXED_INTENT_RE =
+  /\b(?:but|however|except|though|although|swap|change|tweak|modify|replace|switch|make)\b/;
+
+/**
+ * True if the reply is an explicit, unambiguous approval.
+ *
+ * Tolerates the kind of emphasis people actually send on WhatsApp:
+ * elongated letters ("Yess!!", "yeahhh"), exclamation marks, and a single
+ * approval emoji. Anything that mixes approval with a tweak request
+ * ("yes but more playful", "perfect, change the green") is rejected so the
+ * caller routes it to the LLM intent classifier instead.
+ */
 export function isExplicitApproval(reply: string): boolean {
-  const lower = reply.trim().toLowerCase();
-  if (!lower) return false;
-  if (lower.length > 40) return false; // edits tend to be longer sentences
-  // Negations like "not sure" / "no thanks" should never count as approval.
-  if (/\b(no|not|don'?t|nope|nah)\b/.test(lower)) return false;
-  return /\b(yes|yep|yeah|yup|ok(ay)?|lock(ed)?( it)?( in)?|confirm(ed)?|approve(d)?|perfect|great|sounds good|looks good|love it|do it|let's go|go for it)\b/.test(
-    lower,
-  );
+  const trimmed = reply.trim();
+  if (!trimmed) return false;
+  if (trimmed.length > 40) return false; // edits tend to be longer sentences
+  if (APPROVAL_EMOJI_RE.test(trimmed)) return true;
+  const lower = trimmed.toLowerCase();
+  if (NEGATION_RE.test(lower)) return false;
+  if (MIXED_INTENT_RE.test(lower)) return false;
+  return APPROVAL_WORD_RE.test(lower);
 }
 
 /**
