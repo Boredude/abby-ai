@@ -23,7 +23,7 @@ import {
   looksLikeHandle,
 } from '../../../services/onboarding/recap.js';
 import { getDuffyAgent } from '../../agents/duffy.js';
-import { phraseAsDuffy } from '../../agents/voice.js';
+import { phraseAsDuffy, sanitizeUserFacingFromDuffy } from '../../agents/voice.js';
 import { memoryFor } from '../../memory.js';
 import type { OnboardingStep, OnboardingStepContext, OnboardingStepResult } from '../types.js';
 
@@ -265,6 +265,62 @@ function parseWebsiteReply(reply: string): 'skip' | string | null {
   return normalizeWebsiteUrl(trimmed);
 }
 
+/**
+ * Hand a brand-kit tweak to Duffy, then send the resulting confirmation
+ * message back to the user — but never let Duffy's internal reasoning
+ * reach the channel.
+ *
+ * The orchestrator model can be chatty about its plan ("I need to get the
+ * brand context first…", "I see the kit is already locked in…") which is
+ * fine for development but disastrous as a user-facing reply. We give it a
+ * clean, customer-shaped prompt, sanitize the output, and fall back to a
+ * deterministic `phraseAsDuffy` confirmation if the response leaks any
+ * developer-facing plumbing or reads like a reasoning monologue.
+ */
+async function applyEditWithDuffy(opts: {
+  brandId: string;
+  igHandle: string | null;
+  reply: string;
+  editSummary: string;
+  channel: BoundChannel;
+}): Promise<void> {
+  const { brandId, igHandle, reply, editSummary, channel } = opts;
+  const handleLabel = igHandle ? `@${igHandle}` : 'their brand kit';
+
+  let userFacing: string | null = null;
+  try {
+    const duffy = getDuffyAgent();
+    const prompt = [
+      `The user just reviewed the brand board for ${handleLabel} and asked for this tweak: "${editSummary}".`,
+      `(Their original message was: "${reply}".)`,
+      ``,
+      `Apply the change if it maps to a stored field via your tools. Then reply with one short, warm WhatsApp line confirming what you noted in your own voice — only the message body the user should read. No plans, no narration, no labels.`,
+    ].join('\n');
+    const result = await duffy.generate(prompt, { memory: memoryFor(brandId) });
+    userFacing = sanitizeUserFacingFromDuffy((result as { text?: string }).text);
+  } catch (err) {
+    logger.error({ err, brandId }, 'Brand kit edit handling failed');
+  }
+
+  if (userFacing) {
+    await channel.sendText(userFacing);
+    return;
+  }
+
+  // Fallback: deterministic, in-voice acknowledgement so the user never
+  // sees a leaked monologue or an empty reply.
+  await channel.sendText(
+    await phraseAsDuffy({
+      goal: "Acknowledge the user's requested tweak to the brand kit in one short line. Do NOT re-ask what to adjust — they already told you.",
+      mustConvey: `You noted the requested change ("${editSummary}") and will factor it in. Don't promise specifics you haven't actually applied.`,
+      brandId,
+      context: { igHandle, requestedTweak: editSummary },
+      fallback: `Got it — I'll factor in "${editSummary}" on the next pass.`,
+      maxChars: 220,
+    }),
+  );
+}
+
 async function executeBrandKit(ctx: OnboardingStepContext): Promise<OnboardingStepResult> {
   const { brandId, channel, resumeData } = ctx;
   let brand = ctx.brand;
@@ -456,7 +512,7 @@ async function executeBrandKit(ctx: OnboardingStepContext): Promise<OnboardingSt
 
   // intent.intent === 'edit' → let Duffy apply the change. The classifier's
   // editSummary is a clean paraphrase; fall back to the raw reply if absent.
-
+  //
   // Defense in depth: the classifier prompt biases toward "edit" when in
   // doubt, so emphatic-but-shapeless approvals can land here with an
   // editSummary that itself reads like a yes ("yes", "lock it in"). In that
@@ -470,30 +526,20 @@ async function executeBrandKit(ctx: OnboardingStepContext): Promise<OnboardingSt
     return { status: 'done' };
   }
 
-  try {
-    const duffy = getDuffyAgent();
-    const prompt = [
-      `[brandId=${brandId}]`,
-      `The user reviewed the brand kit and wants to tweak something.`,
-      `Their feedback (paraphrased): "${intent.editSummary}".`,
-      `Original message: "${reply}".`,
-      `Apply the change with updateBrandContext if it maps to voice/cadence/timezone.`,
-      `Keep your reply short — confirm what changed in one sentence.`,
-    ].join(' ');
-    const result = await duffy.generate(prompt, { memory: memoryFor(brandId) });
-    const text = (result as { text?: string }).text?.trim() ?? '';
-    if (text) await channel.sendText(text);
-  } catch (err) {
-    logger.error({ err, brandId }, 'Brand kit edit handling failed');
-    await channel.sendText(
-      await phraseAsDuffy({
-        goal: "Tell them you hit a snag applying their edit and ask them to rephrase it.",
-        mustConvey: 'You hit a snag applying that change. Ask them to rephrase it.',
-        brandId,
-        fallback: 'Hit a snag applying that — mind rephrasing the change?',
-      }),
-    );
-  }
+  // Voice contract: Duffy is the customer-facing point of contact. The
+  // prompt here MUST NOT include developer plumbing (brandId tags, tool
+  // names, field labels) because the orchestrator model occasionally
+  // narrates back whatever it reads. Tool/brand context already lives in
+  // the memory thread we pass via `memoryFor(brandId)`. After the call we
+  // sanitize the output and fall back to `phraseAsDuffy` if Duffy leaked
+  // her reasoning or returned nothing usable.
+  await applyEditWithDuffy({
+    brandId,
+    igHandle: brand.igHandle,
+    reply,
+    editSummary: intent.editSummary,
+    channel,
+  });
 
   brand = (await findBrandById(brandId)) ?? brand;
   await presentBrandKitToUser(brand, channel, { force: true });
