@@ -24,6 +24,11 @@ const MAX_FONT_FAMILIES = 12;
 const USER_AGENT =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
+// Limit to true CSS keywords + generic-family names + emoji/system fallbacks.
+// We DON'T filter out names like "Roboto", "Arial", "Helvetica Neue" — many
+// brands actually pick those deliberately and we want to surface them. The
+// loaded-fonts ground truth (Google Fonts + @font-face) already does the
+// disambiguation between "intentional pick" and "system fallback".
 const GENERIC_FONT_KEYWORDS = new Set([
   'inherit',
   'initial',
@@ -38,12 +43,6 @@ const GENERIC_FONT_KEYWORDS = new Set([
   'system-ui',
   '-apple-system',
   'blinkmacsystemfont',
-  'segoe ui',
-  'roboto',
-  'helvetica neue',
-  'arial',
-  'helvetica',
-  'sans',
   'apple color emoji',
   'segoe ui emoji',
   'segoe ui symbol',
@@ -183,13 +182,17 @@ function dedupeKeepFirst(values: string[]): string[] {
   return out;
 }
 
-const FONT_FAMILY_DECL_RE = /font-family\s*:\s*([^;{}]+)/gi;
-const SELECTOR_BLOCK_RE = /([^{}]+)\{([^{}]*)\}/g;
+// IMPORTANT: these regex literals are constructed fresh on each call.
+// Module-level /g RegExp instances share `lastIndex` across invocations,
+// and any `break` in an `.exec` loop leaves the state dirty for the next
+// call (a bug we hit when tests started exercising the analyzer multiple
+// times in one process).
 
 function collectFontFamiliesFromCss(css: string): string[] {
+  const re = /font-family\s*:\s*([^;{}]+)/gi;
   const families: string[] = [];
   let match: RegExpExecArray | null;
-  while ((match = FONT_FAMILY_DECL_RE.exec(css)) !== null) {
+  while ((match = re.exec(css)) !== null) {
     const value = match[1];
     if (!value) continue;
     for (const name of parseFontFamilyValue(value)) {
@@ -200,27 +203,64 @@ function collectFontFamiliesFromCss(css: string): string[] {
 }
 
 /**
- * Walk every selector block and capture the first font name declared on a
- * heading vs. body selector. We don't try to reproduce CSS specificity — we
- * only need a reasonable best-guess per selector class.
+ * Pull every font-family declared inside an `@font-face` block. Sites only
+ * write @font-face for fonts they actually load (self-hosted, Adobe/Typekit,
+ * Cloudflare/Vercel font assets, etc.), so this set is ground truth for "the
+ * brand spent bandwidth on this font" — same level of trust as the Google
+ * Fonts links.
  */
-function pickHeadingAndBodyFonts(css: string): { heading?: string; body?: string } {
+function collectFontFaceFamilies(css: string): string[] {
+  const re = /@font-face\s*\{([^{}]*)\}/gi;
+  const families: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(css)) !== null) {
+    const block = match[1] ?? '';
+    const declMatch = /font-family\s*:\s*([^;{}]+)/i.exec(block);
+    if (!declMatch) continue;
+    for (const name of parseFontFamilyValue(declMatch[1] ?? '')) {
+      if (isUsableFontName(name)) families.push(name);
+    }
+  }
+  return families;
+}
+
+function inSet(name: string, set: Set<string>): boolean {
+  return set.has(name.toLowerCase());
+}
+
+/**
+ * Walk every selector block and capture the heading vs. body font. When we
+ * have a `loadedFonts` ground-truth set we trust it: pick the first font in
+ * the declaration that appears in `loadedFonts` (skipping system fallbacks
+ * like Lucida Console / Helvetica that show up first in a fallback chain
+ * even though the brand never actually loaded them).
+ *
+ * When `loadedFonts` is empty (e.g. site uses purely system fonts) we fall
+ * back to the previous "first font wins" behavior.
+ */
+function pickHeadingAndBodyFonts(
+  css: string,
+  loadedFonts: Set<string>,
+): { heading?: string; body?: string } {
+  const re = /([^{}]+)\{([^{}]*)\}/g;
   let heading: string | undefined;
   let body: string | undefined;
   let match: RegExpExecArray | null;
-  while ((match = SELECTOR_BLOCK_RE.exec(css)) !== null) {
+  while ((match = re.exec(css)) !== null) {
     const selector = (match[1] ?? '').toLowerCase();
     const block = match[2] ?? '';
     const declMatch = /font-family\s*:\s*([^;{}]+)/i.exec(block);
     if (!declMatch) continue;
     const families = parseFontFamilyValue(declMatch[1] ?? '').filter(isUsableFontName);
-    const first = families[0];
-    if (!first) continue;
+    if (families.length === 0) continue;
+    const trusted = loadedFonts.size > 0 ? families.find((f) => inSet(f, loadedFonts)) : undefined;
+    const candidate = trusted ?? (loadedFonts.size === 0 ? families[0] : undefined);
+    if (!candidate) continue;
     const isHeading = /(^|[\s,>+~])h[1-3](\b|[.:#\s,]|$)/.test(selector);
     const isBody = /(^|[\s,>+~])body(\b|[.:#\s,]|$)/.test(selector) ||
       /(^|[\s,>+~])p(\b|[.:#\s,]|$)/.test(selector);
-    if (isHeading && !heading) heading = first;
-    if (isBody && !body) body = first;
+    if (isHeading && !heading) heading = candidate;
+    if (isBody && !body) body = candidate;
     if (heading && body) break;
   }
   return { heading, body };
@@ -352,19 +392,42 @@ export async function analyzeWebsite(
 
   const allCss = [...inlineStyles, ...externalCss].join('\n');
 
-  const familiesFromCss = collectFontFamiliesFromCss(allCss);
-  const familiesFromGoogle = googleFonts.filter(isUsableFontName);
-  const fontFamilies = dedupeKeepFirst(
-    [...familiesFromCss, ...familiesFromGoogle].slice(0, MAX_FONT_FAMILIES * 2),
-  ).slice(0, MAX_FONT_FAMILIES);
+  // "Loaded" fonts = fonts the site actually pays the bandwidth to ship.
+  // This is ground truth for "the brand cares about this font" and is much
+  // more reliable than the first item in any given font-family fallback
+  // chain (which is often a system font like "Lucida Console" or
+  // "Helvetica" used as a stylistic fallback).
+  const familiesFromGoogle = dedupeKeepFirst(googleFonts.filter(isUsableFontName));
+  const familiesFromFontFace = dedupeKeepFirst(collectFontFaceFamilies(allCss));
+  const loadedFontsList = dedupeKeepFirst([...familiesFromGoogle, ...familiesFromFontFace]);
+  const loadedFontsSet = new Set(loadedFontsList.map((f) => f.toLowerCase()));
 
-  const { heading, body } = pickHeadingAndBodyFonts(allCss);
+  const familiesFromCss = collectFontFamiliesFromCss(allCss);
+  // Surface loaded fonts first so downstream consumers that fall back to
+  // `fontFamilies[0]` get the brand's actual choice rather than a fallback.
+  const fontFamilies = dedupeKeepFirst([...loadedFontsList, ...familiesFromCss]).slice(
+    0,
+    MAX_FONT_FAMILIES,
+  );
+
+  let { heading, body } = pickHeadingAndBodyFonts(allCss, loadedFontsSet);
+  // If the selector heuristic couldn't anchor to anything in the loaded set
+  // (e.g. site has @font-face but no h1/body rule we recognized), back-fill
+  // from the loaded fonts so the kit still gets real font names.
+  if (loadedFontsList.length > 0) {
+    if (!heading) heading = loadedFontsList[0];
+    if (!body) {
+      body = loadedFontsList.find((f) => !heading || f.toLowerCase() !== heading.toLowerCase())
+        ?? loadedFontsList[0];
+    }
+  }
 
   log.info(
     {
       url: resolvedUrl,
       stylesheets: stylesheetUrls.length,
       fontCount: fontFamilies.length,
+      loadedFontCount: loadedFontsList.length,
       hasHeadingFont: Boolean(heading),
       hasBodyFont: Boolean(body),
     },
@@ -376,7 +439,7 @@ export async function analyzeWebsite(
     sourceUrl: input.websiteUrl,
     resolvedUrl,
     fontFamilies,
-    googleFonts: dedupeKeepFirst(familiesFromGoogle),
+    googleFonts: familiesFromGoogle,
     ...(heading ? { headingFont: heading } : {}),
     ...(body ? { bodyFont: body } : {}),
     ...(pageTitle ? { pageTitle } : {}),

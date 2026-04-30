@@ -63,6 +63,12 @@ export const brandChannelStatusEnum = pgEnum('brand_channel_status', [
 export const brands = pgTable('brands', {
   id: uuid('id').defaultRandom().primaryKey(),
   igHandle: text('ig_handle'),
+  websiteUrl: text('website_url'),
+  // Transient flag set while the brand-kit step is awaiting a user reply to
+  // the "do you have a website?" prompt. Cleared once we've consumed the
+  // reply (URL or skip). Lets us distinguish a website reply from a
+  // retry / new-handle reply when both arrive in the same sub-state.
+  awaitingWebsiteReply: boolean('awaiting_website_reply').default(false).notNull(),
   voiceJson: jsonb('voice_json').$type<BrandVoice | null>().default(null),
   cadenceJson: jsonb('cadence_json').$type<BrandCadence | null>().default(null),
   brandKitJson: jsonb('brand_kit_json').$type<BrandKit | null>().default(null),

@@ -117,4 +117,94 @@ describe('analyzeWebsite', () => {
     if (result.ok) return;
     expect(result.reason).toBe('invalid_url');
   });
+
+  it('prefers loaded fonts (Google Fonts / @font-face) over system-font fallbacks', async () => {
+    // Mirrors the ob.cocktails case: a heading rule names "Lucida Console"
+    // first as a stylistic fallback, but the brand actually loads Lexend Deca
+    // and Inter via Google Fonts. Ground truth = the loaded set.
+    const html = `
+      <!doctype html>
+      <html>
+        <head>
+          <title>OB</title>
+          <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lexend+Deca&family=Inter&display=swap">
+          <style>
+            body { font-family: "Inter", sans-serif; }
+            h1, h2 { font-family: "Lucida Console", "Courier New", "Lexend Deca", monospace; }
+          </style>
+        </head>
+        <body><h1>hi</h1></body>
+      </html>
+    `;
+    stubFetch(async () => htmlResponse(html, { url: 'https://obcocktails.example/' }));
+
+    const result = await analyzeWebsite({ handle: 'ob', websiteUrl: 'obcocktails.example' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.headingFont).toBe('Lexend Deca');
+    expect(result.bodyFont).toBe('Inter');
+    // Loaded fonts surface at the top of the families list.
+    expect(result.fontFamilies.slice(0, 2)).toEqual(['Lexend Deca', 'Inter']);
+  });
+
+  it('treats @font-face declarations as ground truth (covers Adobe/self-hosted)', async () => {
+    const html = `
+      <!doctype html>
+      <html>
+        <head>
+          <title>SelfHosted</title>
+          <link rel="stylesheet" href="/site.css">
+        </head>
+        <body></body>
+      </html>
+    `;
+    const css = `
+      @font-face { font-family: "Calibre"; src: url('/fonts/calibre.woff2') format('woff2'); }
+      @font-face { font-family: 'Tiempos'; src: url('/fonts/tiempos.woff2') format('woff2'); }
+      body { font-family: "Helvetica Neue", "Calibre", sans-serif; }
+      h1 { font-family: "Times New Roman", "Tiempos", serif; }
+    `;
+    stubFetch(async (url) => {
+      if (url.includes('/site.css')) return cssResponse(css);
+      return htmlResponse(html, { url: 'https://selfhost.example/' });
+    });
+
+    const result = await analyzeWebsite({ handle: 'sh', websiteUrl: 'selfhost.example' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.headingFont).toBe('Tiempos');
+    expect(result.bodyFont).toBe('Calibre');
+    expect(result.fontFamilies).toEqual(
+      expect.arrayContaining(['Calibre', 'Tiempos']),
+    );
+    // Calibre / Tiempos come before the system fallbacks in the list.
+    expect(result.fontFamilies.indexOf('Calibre')).toBeLessThan(
+      result.fontFamilies.indexOf('Helvetica Neue'),
+    );
+  });
+
+  it('falls back to first-font-wins when no loaded fonts are present', async () => {
+    // Pure system-font site: no Google Fonts link, no @font-face. We should
+    // still pick something for the kit.
+    const html = `
+      <!doctype html>
+      <html>
+        <head>
+          <title>System</title>
+          <style>
+            body { font-family: Helvetica, Arial, sans-serif; }
+            h1 { font-family: Georgia, serif; }
+          </style>
+        </head>
+        <body></body>
+      </html>
+    `;
+    stubFetch(async () => htmlResponse(html, { url: 'https://system.example/' }));
+
+    const result = await analyzeWebsite({ handle: 'sys', websiteUrl: 'system.example' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.headingFont).toBe('Georgia');
+    expect(result.bodyFont).toBe('Helvetica');
+  });
 });
