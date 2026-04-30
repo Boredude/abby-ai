@@ -21,11 +21,13 @@ git worktree list
 ```bash
 # from the main repo root
 git fetch origin
-git worktree add -b feat/<feature_name> ../duffy-ai-feat-<feature_name> origin/main
+git worktree add -b feat/<feature_name> ../duffy-ai-feat-<feature_name> origin/main --no-track
 cd ../duffy-ai-feat-<feature_name>
 ```
 
 Use `feat/<feature_name>` for features and `fix/<fix_name>` for fixes (matches the project branch convention).
+
+The `--no-track` flag is REQUIRED. Without it, the new branch inherits `origin/main` as its upstream, and a later `git push` (or Cursor's "Sync") will push the branch's commits straight to `origin/main`, bypassing PR review. With `--no-track`, the branch has no upstream until the first `git push`, which then creates a same-named remote branch (`origin/feat/<feature_name>`).
 
 3. Do ALL editing, testing, and committing inside that worktree directory. Never `git checkout <other-branch>` in a worktree another agent might be using.
 
@@ -48,8 +50,8 @@ git branch -d feat/<feature_name>   # only if fully merged
 ## Quick Reference
 
 ```bash
-git worktree list                                  # see all active worktrees
-git worktree add -b <branch> <path> origin/main    # create new worktree + branch
-git worktree remove <path>                         # clean up when done
-git worktree prune                                 # drop stale entries
+git worktree list                                              # see all active worktrees
+git worktree add -b <branch> <path> origin/main --no-track     # create new worktree + branch (no main upstream!)
+git worktree remove <path>                                     # clean up when done
+git worktree prune                                             # drop stale entries
 ```
