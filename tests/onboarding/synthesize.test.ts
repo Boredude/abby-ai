@@ -4,6 +4,7 @@ import type { InstagramScrapeResult } from '../../src/services/apify/instagramSc
 import type { ProfilePicAnalysis } from '../../src/services/onboarding/analyzeProfilePic.js';
 import type { VisualAnalysis } from '../../src/services/onboarding/analyzeVisuals.js';
 import type { VoiceAnalysis } from '../../src/services/onboarding/analyzeVoice.js';
+import type { WebsiteAnalysis } from '../../src/services/onboarding/analyzeWebsite.js';
 
 const scrape: InstagramScrapeResult = {
   profile: {
@@ -116,6 +117,44 @@ describe('synthesizeBrandKit', () => {
     expect(out.igAnalysis.rawVoice).toEqual(voice);
     expect(out.igAnalysis.rawProfilePic).toEqual(profilePic);
     expect(typeof out.igAnalysis.capturedAt).toBe('string');
+  });
+
+  it('falls back to instagram-only typography when no website is provided', () => {
+    const out = synthesizeBrandKit({ scrape, profilePic, visuals, voice });
+    expect(out.brandKit.typography.source).toBe('instagram');
+    expect(out.brandKit.typography.headingFont).toBeUndefined();
+    expect(out.brandKit.typography.bodyFont).toBeUndefined();
+    expect(out.brandKit.typography.fontFamilies).toBeUndefined();
+    expect(out.igAnalysis.rawWebsite).toBeUndefined();
+    expect(out.igAnalysis.profile.externalUrl).toBe('https://bit.ly/4tX4uZt');
+  });
+
+  it('enriches typography with website font names and overrides externalUrl', () => {
+    const website: WebsiteAnalysis = {
+      ok: true,
+      sourceUrl: 'humansofny.com',
+      resolvedUrl: 'https://www.humansofny.com/',
+      fontFamilies: ['Source Serif Pro', 'Inter', 'Helvetica Neue'],
+      headingFont: 'Source Serif Pro',
+      bodyFont: 'Inter',
+      googleFonts: ['Source Serif Pro', 'Inter'],
+      pageTitle: 'Humans of New York',
+    };
+
+    const out = synthesizeBrandKit({ scrape, profilePic, visuals, voice, website });
+
+    expect(out.brandKit.typography.source).toBe('mixed');
+    expect(out.brandKit.typography.headingFont).toBe('Source Serif Pro');
+    expect(out.brandKit.typography.bodyFont).toBe('Inter');
+    expect(out.brandKit.typography.fontFamilies).toEqual([
+      'Source Serif Pro',
+      'Inter',
+      'Helvetica Neue',
+    ]);
+    expect(out.brandKit.typography.mood).toContain('Source Serif Pro');
+    expect(out.brandKit.typography.mood).toContain('Inter');
+    expect(out.igAnalysis.rawWebsite).toEqual(website);
+    expect(out.igAnalysis.profile.externalUrl).toBe('https://www.humansofny.com/');
   });
 
   it('omits optional profile fields that are undefined', () => {
