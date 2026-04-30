@@ -10,6 +10,8 @@ import { analyzeInstagramProfilePic } from './analyzeProfilePic.js';
 import { analyzeInstagramVisuals } from './analyzeVisuals.js';
 import { analyzeInstagramVoice } from './analyzeVoice.js';
 import { analyzeWebsite, type WebsiteAnalysis } from './analyzeWebsite.js';
+import { mirrorIgImages, type MirrorImageInput } from './igImageMirror.js';
+import { reconcileTypography } from './reconcileTypography.js';
 import { synthesizeBrandKit } from './synthesizeBrandKit.js';
 
 export type AnalyzeBrandResult =
@@ -132,6 +134,18 @@ export async function analyzeBrand(input: {
   // skip it; the kit still ships with IG-only typography.
   const effectiveWebsite = input.website ?? scrape.profile.externalUrl;
 
+  // Kick off the IG-image-mirror in parallel with the analyzer fan-out:
+  // download every IG asset we'll persist (profile pic + every post grid
+  // image) and upload to R2 so the brand row stops carrying time-limited IG
+  // CDN URLs. The analyzers themselves keep using the IG URLs (they download
+  // bytes inline, so they don't benefit from the mirror); the synthesizer
+  // and downstream brand-board step pick up whatever the mirror returns.
+  const mirrorInputs: MirrorImageInput[] = [
+    { label: 'profile-pic', url: profilePicUrl },
+    ...scrape.posts.map((p, i) => ({ label: `post-${i + 1}`, url: p.imageUrl })),
+  ].filter((i): i is MirrorImageInput => Boolean(i.url));
+  const mirrorPromise = mirrorIgImages(input.brandId, mirrorInputs);
+
   // Fan-out: run the profile-pic + post-grid + voice analyzers in parallel
   // as named subtasks of the brand-kit step. The website analyzer joins the
   // fan-out only when we have a URL, and never causes the kit to fail.
@@ -237,12 +251,31 @@ export async function analyzeBrand(input: {
     );
   }
 
+  // Run two more independent steps in parallel:
+  //  • Wait for the R2 mirror started above (failures silently drop entries
+  //    and we keep the original IG URL for those — best-effort).
+  //  • LLM-based typography reconciliation: combines the IG visual mood with
+  //    the website analyzer's actual fonts into one coherent description.
+  //    Falls back to the deterministic template in `synthesizeBrandKit`
+  //    when the model call errors out (returns null).
+  const [mirroredUrls, typography] = await Promise.all([
+    mirrorPromise,
+    reconcileTypography({
+      handle: input.handle,
+      visualTypographyMood: visuals.typographyMood,
+      ...(website ? { website } : {}),
+      ...(input.brandHint ? { brandHint: input.brandHint } : {}),
+    }),
+  ]);
+
   const synthesized = synthesizeBrandKit({
     scrape,
     profilePic,
     visuals,
     voice,
     ...(website ? { website } : {}),
+    ...(typography ? { typography } : {}),
+    mirroredUrls,
   });
 
   await updateBrand(input.brandId, {

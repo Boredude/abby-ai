@@ -10,6 +10,7 @@ import type { ProfilePicAnalysis } from './analyzeProfilePic.js';
 import type { VisualAnalysis } from './analyzeVisuals.js';
 import type { VoiceAnalysis } from './analyzeVoice.js';
 import type { WebsiteAnalysis } from './analyzeWebsite.js';
+import type { MirroredImage } from './igImageMirror.js';
 
 /**
  * Stitch the raw scrape + analyzer outputs into the persisted brand shapes.
@@ -22,6 +23,21 @@ export type SynthesizeInput = {
   visuals: VisualAnalysis;
   voice: VoiceAnalysis;
   website?: WebsiteAnalysis;
+  /**
+   * Optional pre-reconciled typography object. When present we trust it
+   * verbatim; when absent we derive a deterministic typography description
+   * from the website + IG signals. Lets `analyzeBrand` plug an LLM-based
+   * reconciler in front of synthesizeBrandKit without making this module
+   * impure.
+   */
+  typography?: BrandKit['typography'];
+  /**
+   * Map from original IG CDN URL → R2-mirrored copy. When provided we
+   * replace IG URLs with R2 URLs everywhere we persist them (snapshot,
+   * logo.profilePicUrl, post imageUrls), so the brand row stops depending
+   * on Instagram's time-limited tokens for downstream re-fetches.
+   */
+  mirroredUrls?: Map<string, MirroredImage>;
 };
 
 export type SynthesizedBrand = {
@@ -32,9 +48,16 @@ export type SynthesizedBrand = {
 };
 
 export function synthesizeBrandKit(input: SynthesizeInput): SynthesizedBrand {
-  const { scrape, profilePic, visuals, voice, website } = input;
+  const { scrape, profilePic, visuals, voice, website, mirroredUrls } = input;
 
-  const profilePicUrl = scrape.profile.profilePicUrlHD ?? scrape.profile.profilePicUrl;
+  const stableUrl = (url: string | undefined): string | undefined => {
+    if (!url) return undefined;
+    return mirroredUrls?.get(url)?.url ?? url;
+  };
+
+  const rawProfilePicUrl =
+    scrape.profile.profilePicUrlHD ?? scrape.profile.profilePicUrl;
+  const profilePicUrl = stableUrl(rawProfilePicUrl);
 
   const logo: BrandLogo = {
     markType: profilePic.logo.markType,
@@ -44,7 +67,7 @@ export function synthesizeBrandKit(input: SynthesizeInput): SynthesizedBrand {
     ...(profilePicUrl ? { profilePicUrl } : {}),
   };
 
-  const typography = buildTypography(visuals, website);
+  const typography = input.typography ?? buildTypography(visuals, website);
 
   const brandKit: BrandKit = {
     palette: profilePic.palette.map((p) => ({
@@ -93,11 +116,7 @@ export function synthesizeBrandKit(input: SynthesizeInput): SynthesizedBrand {
       ...(scrape.profile.postsCount !== undefined
         ? { postsCount: scrape.profile.postsCount }
         : {}),
-      ...(scrape.profile.profilePicUrlHD !== undefined
-        ? { profilePicUrl: scrape.profile.profilePicUrlHD }
-        : scrape.profile.profilePicUrl !== undefined
-          ? { profilePicUrl: scrape.profile.profilePicUrl }
-          : {}),
+      ...(profilePicUrl !== undefined ? { profilePicUrl } : {}),
       ...(scrape.profile.isVerified !== undefined
         ? { isVerified: scrape.profile.isVerified }
         : {}),
@@ -109,7 +128,7 @@ export function synthesizeBrandKit(input: SynthesizeInput): SynthesizedBrand {
     },
     posts: scrape.posts.map((p) => ({
       url: p.url,
-      imageUrl: p.imageUrl,
+      imageUrl: stableUrl(p.imageUrl) ?? p.imageUrl,
       caption: p.caption,
       ...(p.likesCount !== undefined ? { likes: p.likesCount } : {}),
       ...(p.commentsCount !== undefined ? { comments: p.commentsCount } : {}),
@@ -128,10 +147,21 @@ export function synthesizeBrandKit(input: SynthesizeInput): SynthesizedBrand {
 }
 
 /**
- * Combine the post-grid mood string (always present) with whatever font
- * names we managed to scrape from the brand's website (when available).
- * The `mood` string stays human-readable for image-generation prompts; the
- * structured fields give the rest of the system real font names to work with.
+ * Deterministic typography fallback. Used when the LLM reconciler upstream
+ * returned nothing (or wasn't called). Two principles:
+ *
+ *  1. When the website analyzer succeeded, the website's actual fonts are
+ *     the source of truth for typography — they're the only signal in our
+ *     pipeline grounded in real CSS rather than vibes-from-photos. We mark
+ *     `source: 'website'` and emit a font-aware mood string that doesn't
+ *     reference the IG-derived typographyMood at all (which often
+ *     contradicts the actual website type system, e.g. florals + script vs.
+ *     clean geometric sans).
+ *
+ *  2. When there's no website signal, fall back to the IG-derived
+ *     typographyMood — that's still the best guess we have for "how does
+ *     the brand's type *feel*", even though it's inferred from photo
+ *     content rather than declared CSS.
  */
 function buildTypography(
   visuals: VisualAnalysis,
@@ -144,38 +174,51 @@ function buildTypography(
 
   const fontFamilies = website.fontFamilies.length > 0 ? website.fontFamilies : undefined;
   const headingFont = website.headingFont ?? fontFamilies?.[0];
-  const bodyFont = website.bodyFont ?? (fontFamilies && fontFamilies.length > 1 ? fontFamilies[1] : undefined);
+  const bodyFont =
+    website.bodyFont ?? (fontFamilies && fontFamilies.length > 1 ? fontFamilies[1] : undefined);
 
-  const fontHint = formatFontHint(headingFont, bodyFont, fontFamilies);
-  const mood = fontHint ? `${baseMood} — primary type: ${fontHint}` : baseMood;
   const hasAnyFontInfo = Boolean(headingFont || bodyFont || fontFamilies?.length);
-  const source: NonNullable<BrandKit['typography']['source']> = hasAnyFontInfo
-    ? 'mixed'
-    : 'instagram';
+  if (!hasAnyFontInfo) {
+    // Website analyzer succeeded but found no fonts (rare — SPA / image-only
+    // homepage). Treat as IG-only.
+    return { mood: baseMood, source: 'instagram' };
+  }
+
+  // Website is authoritative. Build a mood string that *only* references the
+  // actual fonts. The IG-derived typographyMood is intentionally dropped
+  // here — keeping it would re-introduce the contradiction (e.g. the IG
+  // grid says "elegant serif with script italics" but the website CSS uses
+  // Lexend Deca + Inter). The IG mood is still preserved on
+  // `igAnalysis.rawVisuals.typographyMood` for debugging and future use.
+  const mood = describeFontPair(headingFont, bodyFont, fontFamilies);
 
   return {
     mood,
-    source,
+    source: 'website',
     ...(headingFont ? { headingFont } : {}),
     ...(bodyFont ? { bodyFont } : {}),
     ...(fontFamilies ? { fontFamilies } : {}),
   };
 }
 
-function formatFontHint(
+function describeFontPair(
   heading: string | undefined,
   body: string | undefined,
   families: string[] | undefined,
-): string | null {
+): string {
   if (heading && body && heading.toLowerCase() !== body.toLowerCase()) {
-    return `${heading} (heading) / ${body} (body)`;
+    return `Brand type system from the live site: ${heading} for headings, ${body} for body. Render the typography sample using these exact fonts (or visually-faithful substitutes).`;
   }
-  if (heading) return `${heading} (heading)`;
-  if (body) return `${body} (body)`;
-  if (families && families.length > 0) {
-    return families.slice(0, 2).join(' / ');
+  if (heading) {
+    return `Brand type system from the live site: ${heading}. Render the typography sample in this font (or a visually-faithful substitute).`;
   }
-  return null;
+  if (body) {
+    return `Brand type system from the live site: ${body}. Render the typography sample in this font (or a visually-faithful substitute).`;
+  }
+  const list = (families ?? []).slice(0, 2).join(' / ');
+  return list
+    ? `Brand type system from the live site: ${list}.`
+    : 'Brand type system from the live site (font names unavailable).';
 }
 
 function mapPostType(t: string): IgAnalysisSnapshot['posts'][number]['type'] {
@@ -185,3 +228,7 @@ function mapPostType(t: string): IgAnalysisSnapshot['posts'][number]['type'] {
   if (lower === 'image') return 'image';
   return 'image';
 }
+
+// Re-export for unit testing. `buildTypography` is the deterministic fallback
+// used when the LLM reconciler upstream is disabled or fails.
+export { buildTypography as _buildTypographyForTests };
