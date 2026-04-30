@@ -227,6 +227,10 @@ export type BrandKit = {
   typography: {
     mood: string;
     sample?: string;
+    headingFont?: string;
+    bodyFont?: string;
+    fontFamilies?: string[];
+    source?: 'instagram' | 'website' | 'mixed';
   };
   logo?: BrandLogo;
 };
@@ -266,6 +270,7 @@ export type IgAnalysisSnapshot = {
   rawVisuals?: unknown;
   rawVoice?: unknown;
   rawProfilePic?: unknown;
+  rawWebsite?: unknown;
 };
 
 // ---- Inferred row types ----

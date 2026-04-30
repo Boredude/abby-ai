@@ -37,8 +37,18 @@ export function buildBrandBoardPrompt(brand: Brand): string {
 
   if (kit?.typography?.mood) {
     const sample = kit.typography.sample?.trim() || `@${handle}`;
+    const heading = kit.typography.headingFont;
+    const body = kit.typography.bodyFont;
+    const fontHint =
+      heading && body && heading.toLowerCase() !== body.toLowerCase()
+        ? ` (use ${heading} for the heading and ${body} for the body line if available, otherwise approximate)`
+        : heading
+          ? ` (use ${heading} if available, otherwise approximate)`
+          : body
+            ? ` (use ${body} if available, otherwise approximate)`
+            : '';
     lines.push(
-      `Typography section: render the word "${sample}" in the typographic style described as "${kit.typography.mood}". Include a one-line note describing that style.`,
+      `Typography section: render the word "${sample}" in the typographic style described as "${kit.typography.mood}"${fontHint}. Include a one-line note describing that style.`,
     );
   }
 
