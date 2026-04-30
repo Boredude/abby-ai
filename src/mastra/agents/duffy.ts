@@ -3,6 +3,7 @@ import { loadEnv } from '../../config/env.js';
 import { getSharedMemory } from '../memory.js';
 import { delegateToTool } from '../tools/delegateTo.js';
 import { generateImageTool } from '../tools/generateImage.js';
+import { getBrandBoardTool } from '../tools/getBrandBoard.js';
 import { getBrandContextTool } from '../tools/getBrandContext.js';
 import { sendChannelMessageTool } from '../tools/sendChannelMessage.js';
 import { updateBrandContextTool } from '../tools/updateBrandContext.js';
@@ -131,6 +132,7 @@ export function getDuffyAgent(): Agent {
     tools: {
       getBrandContext: getBrandContextTool,
       updateBrandContext: updateBrandContextTool,
+      getBrandBoard: getBrandBoardTool,
       delegateTo: delegateToTool,
       sendChannelMessage: sendChannelMessageTool,
       generateImage: generateImageTool,

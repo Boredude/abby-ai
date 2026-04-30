@@ -31,13 +31,14 @@ describe('agent wiring', () => {
     ]);
   });
 
-  it('builds Duffy with the supervisor tool set (delegateTo, sendChannelMessage, brand context, generateImage)', async () => {
+  it('builds Duffy with the supervisor tool set (delegateTo, sendChannelMessage, brand context, brand board, generateImage)', async () => {
     const duffy = getDuffyAgent();
     expect(duffy.id).toBe('duffy');
     const tools = await duffy.listTools();
     expect(Object.keys(tools).sort()).toEqual([
       'delegateTo',
       'generateImage',
+      'getBrandBoard',
       'getBrandContext',
       'sendChannelMessage',
       'updateBrandContext',

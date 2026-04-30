@@ -1,0 +1,43 @@
+---
+description: Avoid bloating agent system prompts with ad-hoc behavior guides; prefer tools, sub-agents, or data plumbing instead
+alwaysApply: true
+---
+
+# Avoid Ad-Hoc Prompt Guides
+
+Agent system prompts (Duffy and the sub-agents in `src/mastra/agents/*`) are
+loaded on EVERY turn. Anything you append there pays a token cost on every
+message, every brand, forever. Treat new prompt sections as a last resort.
+
+## Before adding instructions to an agent prompt, try these in order
+
+1. **A dedicated tool.** Encode the behavior in a tool's `id`, `description`,
+   `inputSchema`, and `outputSchema`. Tool descriptions are surfaced to the
+   model only during tool selection, not on every turn, and the schema itself
+   constrains misuse.
+2. **Enrich an existing tool.** If a tool's output is missing a field the agent
+   would otherwise need a prompt rule to find (e.g. a persisted URL, a status
+   flag), add the field rather than describing the lookup in prose.
+3. **Delegate to a sub-agent.** If the behavior is a multi-step specialist
+   workflow, give it its own agent under `src/mastra/agents/` and let Duffy
+   reach it via `delegateTo`.
+4. **Move the decision into code.** Routing, slash commands, and deterministic
+   "if X then Y" logic belong in `src/services/inboundDispatcher.ts` or the
+   relevant service — not in the prompt.
+
+## Only edit a system prompt when
+
+- The change is a stable, cross-cutting behavior that genuinely applies to most
+  turns (voice rules, the supervisor pattern, the working-memory contract).
+- It cannot be expressed as a tool description, schema, or service-layer rule.
+- You've removed or compressed an existing section to keep total prompt size
+  roughly flat.
+
+## Concrete example
+
+User asks "show me my brand board" but Duffy can't find the URL.
+
+- BAD: add a "SHOWING THE BRAND BOARD" section to `duffy.ts` walking through
+  when to call which tool — bloats every turn.
+- GOOD: add a focused `getBrandBoard` tool whose description tells the model
+  exactly when to use it, and register it in Duffy's tools map.
