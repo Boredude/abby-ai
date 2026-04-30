@@ -144,7 +144,10 @@ export async function analyzeBrand(input: {
     { label: 'profile-pic', url: profilePicUrl },
     ...scrape.posts.map((p, i) => ({ label: `post-${i + 1}`, url: p.imageUrl })),
   ].filter((i): i is MirrorImageInput => Boolean(i.url));
-  const mirrorPromise = mirrorIgImages(input.brandId, mirrorInputs);
+  const mirrorPromise = mirrorIgImages(
+    { brandId: input.brandId, igHandle: input.handle },
+    mirrorInputs,
+  );
 
   // Fan-out: run the profile-pic + post-grid + voice analyzers in parallel
   // as named subtasks of the brand-kit step. The website analyzer joins the

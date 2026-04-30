@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { logger } from '../../config/logger.js';
-import { uploadToR2 } from '../storage/r2.js';
+import { pickOwnerSegment, uploadToR2 } from '../storage/r2.js';
 import { downloadImage, type DownloadedImage } from './visionImage.js';
 
 /**
@@ -34,6 +34,16 @@ export type MirrorImageInput = {
   url: string;
 };
 
+/**
+ * Owner identifiers used to build a human-readable R2 key segment. We prefer
+ * the IG handle (the dashboard then shows folders like `ig-mirror/cocktailshq/`)
+ * and fall back to the opaque brand id when a handle isn't available yet.
+ */
+export type MirrorOwner = {
+  brandId: string;
+  igHandle?: string | null;
+};
+
 const KEY_PREFIX = 'ig-mirror';
 
 function extOf(mediaType: string): string {
@@ -47,9 +57,11 @@ function sanitizeLabel(label: string): string {
   return label.replace(/[^a-z0-9_-]+/gi, '-').slice(0, 40) || 'image';
 }
 
-function r2KeyFor(brandId: string, label: string, originalUrl: string, mediaType: string): string {
+function r2KeyFor(owner: MirrorOwner, label: string, originalUrl: string, mediaType: string): string {
   const sha = createHash('sha256').update(originalUrl).digest('hex').slice(0, 16);
-  return `${KEY_PREFIX}/${brandId}/${sanitizeLabel(label)}-${sha}.${extOf(mediaType)}`;
+  const ownerSeg =
+    pickOwnerSegment({ slug: owner.igHandle, fallbackId: owner.brandId }) ?? owner.brandId;
+  return `${KEY_PREFIX}/${ownerSeg}/${sanitizeLabel(label)}-${sha}.${extOf(mediaType)}`;
 }
 
 /**
@@ -58,10 +70,15 @@ function r2KeyFor(brandId: string, label: string, originalUrl: string, mediaType
  * for now" and fall back to the original URL or skip it.
  */
 export async function mirrorIgImage(
-  brandId: string,
+  owner: MirrorOwner,
   input: MirrorImageInput,
 ): Promise<MirroredImage | null> {
-  const log = logger.child({ brandId, mirror: 'ig-image', label: input.label });
+  const log = logger.child({
+    brandId: owner.brandId,
+    igHandle: owner.igHandle ?? undefined,
+    mirror: 'ig-image',
+    label: input.label,
+  });
   let img: DownloadedImage;
   try {
     img = await downloadImage(input.url);
@@ -69,7 +86,7 @@ export async function mirrorIgImage(
     log.warn({ err, url: input.url }, 'IG image mirror: download failed');
     return null;
   }
-  const key = r2KeyFor(brandId, input.label, input.url, img.mediaType);
+  const key = r2KeyFor(owner, input.label, input.url, img.mediaType);
   try {
     const { url } = await uploadToR2({
       key,
@@ -94,14 +111,18 @@ export async function mirrorIgImage(
  * matching on label.
  */
 export async function mirrorIgImages(
-  brandId: string,
+  owner: MirrorOwner,
   inputs: MirrorImageInput[],
 ): Promise<Map<string, MirroredImage>> {
-  const log = logger.child({ brandId, mirror: 'ig-images' });
+  const log = logger.child({
+    brandId: owner.brandId,
+    igHandle: owner.igHandle ?? undefined,
+    mirror: 'ig-images',
+  });
   const out = new Map<string, MirroredImage>();
   if (inputs.length === 0) return out;
   const started = Date.now();
-  const results = await Promise.all(inputs.map((i) => mirrorIgImage(brandId, i)));
+  const results = await Promise.all(inputs.map((i) => mirrorIgImage(owner, i)));
   for (const r of results) {
     if (r) out.set(r.originalUrl, r);
   }

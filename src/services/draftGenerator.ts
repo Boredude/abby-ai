@@ -84,6 +84,8 @@ export async function generateDraftForBrand(args: {
     size: '1024x1536',
     quality: 'medium',
     ownerId: brand.id,
+    ...(brand.igHandle ? { ownerSlug: brand.igHandle } : {}),
+    kind: 'draft',
   });
 
   return {
