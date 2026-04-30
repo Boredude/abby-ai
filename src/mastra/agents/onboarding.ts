@@ -2,6 +2,7 @@ import { Agent } from '@mastra/core/agent';
 import { loadEnv } from '../../config/env.js';
 import { getSharedMemory } from '../memory.js';
 import {
+  analyzeBrandWebsiteTool,
   analyzeInstagramProfilePicTool,
   analyzeInstagramVisualsTool,
   analyzeInstagramVoiceTool,
@@ -25,11 +26,17 @@ Given a brand's Instagram handle and brandId, you autonomously:
      lighting, motifs, do/don't). Do NOT pass the profile picture here.
   4. Call \`analyzeInstagramVoice\` with the handle, the profile biography, and the post captions
      (skip empty captions). Pass the brandHint from the user if available.
-  5. Call \`saveBrandKit\` with brandId, the original \`scrape\` payload, and the three analyzer
-     outputs (\`profilePic\`, \`visuals\`, \`voice\`). This persists the brand kit, design system,
-     and voice to the database. THIS STEP IS REQUIRED — the calling workflow detects success
-     by checking that the brand kit was saved.
-  6. Reply with a single short sentence like "Saved the brand kit for @handle." The calling
+  5. If the brand has a website URL — either \`profile.externalUrl\` from the scrape or a
+     \`website\` value provided to you by the calling workflow — call \`analyzeBrandWebsite\`
+     with the handle and that URL to enrich typography with real font names. Skip this step
+     entirely when no website URL is available, and never block the kit on it: this tool may
+     return \`ok: false\`, in which case ignore the website analysis and continue.
+  6. Call \`saveBrandKit\` with brandId, the original \`scrape\` payload, the three analyzer
+     outputs (\`profilePic\`, \`visuals\`, \`voice\`), and (if you ran step 5 successfully) the
+     \`website\` analysis. This persists the brand kit, design system, and voice to the
+     database. THIS STEP IS REQUIRED — the calling workflow detects success by checking
+     that the brand kit was saved.
+  7. Reply with a single short sentence like "Saved the brand kit for @handle." The calling
      workflow renders the user-facing recap itself, so do not include bullet lists or palettes.
 
 RULES:
@@ -56,6 +63,7 @@ export function getOnboardingAgent(): Agent {
       analyzeInstagramProfilePic: analyzeInstagramProfilePicTool,
       analyzeInstagramVisuals: analyzeInstagramVisualsTool,
       analyzeInstagramVoice: analyzeInstagramVoiceTool,
+      analyzeBrandWebsite: analyzeBrandWebsiteTool,
       saveBrandKit: saveBrandKitTool,
     },
   });

@@ -4,10 +4,12 @@ import { pickOk, runParallel } from '../../mastra/onboarding/parallel.js';
 import {
   fetchInstagramProfile,
   InstagramScraperError,
+  type InstagramScrapeResult,
 } from '../apify/instagramScraper.js';
 import { analyzeInstagramProfilePic } from './analyzeProfilePic.js';
 import { analyzeInstagramVisuals } from './analyzeVisuals.js';
 import { analyzeInstagramVoice } from './analyzeVoice.js';
+import { analyzeWebsite, type WebsiteAnalysis } from './analyzeWebsite.js';
 import { synthesizeBrandKit } from './synthesizeBrandKit.js';
 
 export type AnalyzeBrandResult =
@@ -71,24 +73,32 @@ export async function analyzeBrand(input: {
   brandId: string;
   handle: string;
   brandHint?: string;
+  /** User- or scraper-provided website URL. Falls back to scrape.profile.externalUrl. */
+  website?: string;
+  /** Reuse a previously-fetched scrape result (e.g. from a website-prompt sub-step). */
+  prefetchedScrape?: InstagramScrapeResult;
 }): Promise<AnalyzeBrandResult> {
   const log = logger.child({ brandId: input.brandId, handle: input.handle });
 
-  let scrape;
-  try {
-    scrape = await fetchInstagramProfile(input.handle);
-  } catch (err) {
-    if (err instanceof InstagramScraperError) {
-      log.warn({ code: err.code, msg: err.message }, 'Instagram scrape failed');
-      return { ok: false, handle: input.handle, reason: err.code, message: err.message };
+  let scrape: InstagramScrapeResult;
+  if (input.prefetchedScrape) {
+    scrape = input.prefetchedScrape;
+  } else {
+    try {
+      scrape = await fetchInstagramProfile(input.handle);
+    } catch (err) {
+      if (err instanceof InstagramScraperError) {
+        log.warn({ code: err.code, msg: err.message }, 'Instagram scrape failed');
+        return { ok: false, handle: input.handle, reason: err.code, message: err.message };
+      }
+      log.error({ err }, 'Instagram scrape threw unexpectedly');
+      return {
+        ok: false,
+        handle: input.handle,
+        reason: 'unknown',
+        message: (err as Error).message,
+      };
     }
-    log.error({ err }, 'Instagram scrape threw unexpectedly');
-    return {
-      ok: false,
-      handle: input.handle,
-      reason: 'unknown',
-      message: (err as Error).message,
-    };
   }
 
   const imageUrls = scrape.posts.map((p) => p.imageUrl);
@@ -116,14 +126,20 @@ export async function analyzeBrand(input: {
     };
   }
 
+  // Resolve which website URL (if any) to feed into the optional website
+  // analyzer: an explicit user-provided URL beats whatever the IG scraper
+  // returned. We keep it best-effort: if the website analyzer fails we just
+  // skip it; the kit still ships with IG-only typography.
+  const effectiveWebsite = input.website ?? scrape.profile.externalUrl;
+
   // Fan-out: run the profile-pic + post-grid + voice analyzers in parallel
-  // as named subtasks of the brand-kit step. Adding a future analyzer (e.g.
-  // a Playwright grid screenshot or a competitor-scrape) is a one-line
-  // addition here.
+  // as named subtasks of the brand-kit step. The website analyzer joins the
+  // fan-out only when we have a URL, and never causes the kit to fail.
   type AnalyzerOutput =
     | Awaited<ReturnType<typeof analyzeInstagramProfilePic>>
     | Awaited<ReturnType<typeof analyzeInstagramVisuals>>
-    | Awaited<ReturnType<typeof analyzeInstagramVoice>>;
+    | Awaited<ReturnType<typeof analyzeInstagramVoice>>
+    | Awaited<ReturnType<typeof analyzeWebsite>>;
   const fanout = await runParallel<AnalyzerOutput>(
     [
       {
@@ -154,11 +170,25 @@ export async function analyzeBrand(input: {
             ...(input.brandHint ? { brandHint: input.brandHint } : {}),
           }),
       },
+      ...(effectiveWebsite
+        ? [
+            {
+              name: 'website',
+              run: () =>
+                analyzeWebsite({
+                  handle: input.handle,
+                  websiteUrl: effectiveWebsite,
+                  ...(input.brandHint ? { brandHint: input.brandHint } : {}),
+                }),
+            },
+          ]
+        : []),
     ],
     { label: 'brandKit:analyze' },
   );
 
-  const firstFailure = fanout.find((r) => !r.ok);
+  // Website failures are best-effort: ignore them when surfacing fatal errors.
+  const firstFailure = fanout.find((r) => !r.ok && r.name !== 'website');
   if (firstFailure && !firstFailure.ok) {
     const reason = classifyAnalyzerError(firstFailure.error);
     log.error(
@@ -192,7 +222,28 @@ export async function analyzeBrand(input: {
     };
   }
 
-  const synthesized = synthesizeBrandKit({ scrape, profilePic, visuals, voice });
+  // Only feed website data into the synthesizer when the analyzer actually
+  // succeeded (it returns a failure object on parse/fetch errors instead of
+  // throwing).
+  const websiteResult = pickOk(fanout, 'website') as
+    | Awaited<ReturnType<typeof analyzeWebsite>>
+    | undefined;
+  const website: WebsiteAnalysis | undefined =
+    websiteResult && websiteResult.ok ? websiteResult : undefined;
+  if (websiteResult && !websiteResult.ok) {
+    log.warn(
+      { reason: websiteResult.reason, msg: websiteResult.message, url: websiteResult.sourceUrl },
+      'Website analysis failed; continuing without it',
+    );
+  }
+
+  const synthesized = synthesizeBrandKit({
+    scrape,
+    profilePic,
+    visuals,
+    voice,
+    ...(website ? { website } : {}),
+  });
 
   await updateBrand(input.brandId, {
     igHandle: scrape.profile.username,

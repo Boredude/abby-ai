@@ -16,12 +16,13 @@ import { getSchedulerAgent } from '../../src/mastra/agents/scheduler.js';
 import { getStylistAgent } from '../../src/mastra/agents/stylist.js';
 
 describe('agent wiring', () => {
-  it('builds OnboardingAgent with the five Instagram tools', async () => {
+  it('builds OnboardingAgent with the six brand-onboarding tools', async () => {
     const agent = getOnboardingAgent();
     expect(agent.id).toBe('onboardingAgent');
     expect(agent.name).toBe('OnboardingAgent');
     const tools = await agent.listTools();
     expect(Object.keys(tools).sort()).toEqual([
+      'analyzeBrandWebsite',
       'analyzeInstagramProfilePic',
       'analyzeInstagramVisuals',
       'analyzeInstagramVoice',

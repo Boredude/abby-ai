@@ -2,8 +2,14 @@ import { logger } from '../../../config/logger.js';
 import type { BoundChannel } from '../../../channels/types.js';
 import { findBrandById, updateBrand } from '../../../db/repositories/brands.js';
 import type { Brand } from '../../../db/schema.js';
-import { normalizeIgHandle } from '../../../services/apify/instagramScraper.js';
+import {
+  fetchInstagramProfile,
+  InstagramScraperError,
+  normalizeIgHandle,
+  type InstagramScrapeResult,
+} from '../../../services/apify/instagramScraper.js';
 import { analyzeBrand } from '../../../services/onboarding/analyzeBrand.js';
+import { normalizeWebsiteUrl } from '../../../services/onboarding/analyzeWebsite.js';
 import {
   buildBrandBoardCaption,
   generateBrandBoard,
@@ -71,83 +77,192 @@ async function presentBrandKitToUser(
   );
 }
 
+/**
+ * Phrases the appropriate Duffy reply for a scrape/analysis failure and
+ * returns the matching review-loop mode. Centralized so the scrape-only
+ * probe and the full analyzeBrand path stay in lock-step.
+ */
+async function handleAnalysisFailure(
+  brandId: string,
+  handle: string,
+  channel: BoundChannel,
+  reason: 'not_found' | 'private' | 'empty' | 'rate_limited' | 'service_unavailable' | 'unknown',
+): Promise<'retry_handle' | 'service_unavailable'> {
+  if (reason === 'service_unavailable') {
+    await channel.sendText(
+      await phraseAsDuffy({
+        goal: 'Tell them the analysis temporarily failed on your side. They can reply "retry" in a couple of minutes or send a different handle.',
+        mustConvey: 'Temporary error on your side. They can reply "retry" in a couple of minutes, or send a different handle.',
+        brandId,
+        context: { igHandle: handle },
+        fallback: `Argh — hit a temporary hiccup on my side analyzing @${handle}. Reply 'retry' in a couple of minutes, or send a different handle.`,
+      }),
+    );
+    return 'service_unavailable';
+  }
+  const { goal, mustConvey, fallback } =
+    reason === 'private'
+      ? {
+          goal: 'Tell them the IG account they gave is private and you can only analyze public ones. Ask for a different handle.',
+          mustConvey:
+            'The given handle is private. You can only analyze public accounts. Ask for a different handle.',
+          fallback: `@${handle} looks private — I can only analyze public accounts. Send a different handle (without the @).`,
+        }
+      : reason === 'not_found'
+        ? {
+            goal: "Tell them you couldn't find that handle on Instagram. Ask them to double-check the spelling and resend (without the @).",
+            mustConvey:
+              "The handle was not found on Instagram. Ask them to double-check spelling and re-send without the @.",
+            fallback: `Couldn't find @${handle} on Instagram. Double-check the spelling and send it again (without the @)?`,
+          }
+        : reason === 'empty'
+          ? {
+              goal: 'Tell them the account exists but has no posts you can analyze. Ask for a different handle.',
+              mustConvey:
+                'The account exists but has no posts to analyze yet. Ask for a different handle.',
+              fallback: `@${handle} doesn't have any posts I can analyze yet. Send a different handle?`,
+            }
+          : {
+              goal: "Generic: you couldn't read that account, ask them to send the handle again (without the @) and you'll retry.",
+              mustConvey:
+                "You couldn't read that account. Ask them to send the handle again (without the @) and you'll retry.",
+              fallback: RETRY_HANDLE_PROMPT,
+            };
+  await channel.sendText(
+    await phraseAsDuffy({
+      goal,
+      mustConvey,
+      brandId,
+      context: { igHandle: handle },
+      fallback,
+    }),
+  );
+  return 'retry_handle';
+}
+
 async function presentBrandKitOrAskRetry(
   brandId: string,
   handle: string,
   channel: BoundChannel,
+  opts: {
+    /** User- or scraper-provided website to feed into the website analyzer. */
+    website?: string;
+    /** Reuse a scrape we already pulled (e.g. during the externalUrl probe). */
+    prefetchedScrape?: InstagramScrapeResult;
+    /** Skip the "diving in…" message when the caller already sent it. */
+    suppressDivingMessage?: boolean;
+  } = {},
 ): Promise<'reviewing' | 'retry_handle' | 'service_unavailable'> {
-  await channel.sendText(
-    await phraseAsDuffy({
-      goal: "You just got a handle and are starting to scrape & analyze it. Tell them you're looking, and to give you a sec.",
-      mustConvey: 'Tell them you are diving into the given handle now and to hold tight for a moment.',
-      brandId,
-      context: { igHandle: handle },
-      fallback: `Diving into @${handle} now — give me a moment to study the feed.`,
-    }),
-  );
+  if (!opts.suppressDivingMessage) {
+    await channel.sendText(
+      await phraseAsDuffy({
+        goal: "You just got a handle and are starting to scrape & analyze it. Tell them you're looking, and to give you a sec.",
+        mustConvey: 'Tell them you are diving into the given handle now and to hold tight for a moment.',
+        brandId,
+        context: { igHandle: handle },
+        fallback: `Diving into @${handle} now — give me a moment to study the feed.`,
+      }),
+    );
+  }
 
-  const result = await analyzeBrand({ brandId, handle });
+  const result = await analyzeBrand({
+    brandId,
+    handle,
+    ...(opts.website ? { website: opts.website } : {}),
+    ...(opts.prefetchedScrape ? { prefetchedScrape: opts.prefetchedScrape } : {}),
+  });
   if (!result.ok) {
     logger.warn(
       { brandId, handle, reason: result.reason },
       'Onboarding analysis failed',
     );
-    if (result.reason === 'service_unavailable') {
-      await channel.sendText(
-        await phraseAsDuffy({
-          goal: 'Tell them the analysis temporarily failed on your side. They can reply "retry" in a couple of minutes or send a different handle.',
-          mustConvey: 'Temporary error on your side. They can reply "retry" in a couple of minutes, or send a different handle.',
-          brandId,
-          context: { igHandle: handle },
-          fallback: `Argh — hit a temporary hiccup on my side analyzing @${handle}. Reply 'retry' in a couple of minutes, or send a different handle.`,
-        }),
-      );
-      return 'service_unavailable';
-    }
-    const { goal, mustConvey, fallback } =
-      result.reason === 'private'
-        ? {
-            goal: 'Tell them the IG account they gave is private and you can only analyze public ones. Ask for a different handle.',
-            mustConvey:
-              'The given handle is private. You can only analyze public accounts. Ask for a different handle.',
-            fallback: `@${handle} looks private — I can only analyze public accounts. Send a different handle (without the @).`,
-          }
-        : result.reason === 'not_found'
-          ? {
-              goal: "Tell them you couldn't find that handle on Instagram. Ask them to double-check the spelling and resend (without the @).",
-              mustConvey:
-                "The handle was not found on Instagram. Ask them to double-check spelling and re-send without the @.",
-              fallback: `Couldn't find @${handle} on Instagram. Double-check the spelling and send it again (without the @)?`,
-            }
-          : result.reason === 'empty'
-            ? {
-                goal: 'Tell them the account exists but has no posts you can analyze. Ask for a different handle.',
-                mustConvey:
-                  'The account exists but has no posts to analyze yet. Ask for a different handle.',
-                fallback: `@${handle} doesn't have any posts I can analyze yet. Send a different handle?`,
-              }
-            : {
-                goal: "Generic: you couldn't read that account, ask them to send the handle again (without the @) and you'll retry.",
-                mustConvey:
-                  "You couldn't read that account. Ask them to send the handle again (without the @) and you'll retry.",
-                fallback: RETRY_HANDLE_PROMPT,
-              };
-    await channel.sendText(
-      await phraseAsDuffy({
-        goal,
-        mustConvey,
-        brandId,
-        context: { igHandle: handle },
-        fallback,
-      }),
-    );
-    return 'retry_handle';
+    return handleAnalysisFailure(brandId, handle, channel, result.reason);
   }
 
   const refreshed = await findBrandById(brandId);
   if (!refreshed) throw new Error(`Brand ${brandId} not found`);
   await presentBrandKitToUser(refreshed, channel);
   return 'reviewing';
+}
+
+/**
+ * Pre-scrape the brand's IG profile so we can decide whether to ask the user
+ * for a website URL before running the full analyzer fan-out. Returns one of:
+ *  - `awaiting_website`: caller should suspend on `question: 'website'`
+ *  - `reviewing` / `retry_handle` / `service_unavailable`: same modes as
+ *    `presentBrandKitOrAskRetry` (the analysis already ran or failed).
+ */
+async function probeAndAnalyzeOrAskWebsite(
+  brandId: string,
+  handle: string,
+  channel: BoundChannel,
+): Promise<'awaiting_website' | 'reviewing' | 'retry_handle' | 'service_unavailable'> {
+  await channel.sendText(
+    await phraseAsDuffy({
+      goal: "You just got a handle and are starting to scrape & analyze it. Tell them you're looking, and to give you a sec.",
+      mustConvey:
+        'Tell them you are diving into the given handle now and to hold tight for a moment.',
+      brandId,
+      context: { igHandle: handle },
+      fallback: `Diving into @${handle} now — give me a moment to study the feed.`,
+    }),
+  );
+
+  let scrape: InstagramScrapeResult;
+  try {
+    scrape = await fetchInstagramProfile(handle);
+  } catch (err) {
+    if (err instanceof InstagramScraperError) {
+      logger.warn(
+        { brandId, handle, code: err.code, msg: err.message },
+        'IG profile probe failed',
+      );
+      return handleAnalysisFailure(brandId, handle, channel, err.code);
+    }
+    logger.error({ err, brandId, handle }, 'IG profile probe threw unexpectedly');
+    return handleAnalysisFailure(brandId, handle, channel, 'unknown');
+  }
+
+  const externalUrl = scrape.profile.externalUrl?.trim();
+  if (externalUrl) {
+    await updateBrand(brandId, { websiteUrl: externalUrl, awaitingWebsiteReply: false });
+    return presentBrandKitOrAskRetry(brandId, handle, channel, {
+      website: externalUrl,
+      prefetchedScrape: scrape,
+      suppressDivingMessage: true,
+    });
+  }
+
+  // No website on the IG profile — ask the user. We can't carry the scrape
+  // result across the suspend boundary, so on resume we'll re-scrape inside
+  // analyzeBrand. That's a single extra Apify call in the no-externalUrl case
+  // and lets us avoid serializing scrape blobs into Mastra suspend metadata.
+  await updateBrand(brandId, { awaitingWebsiteReply: true });
+  await channel.sendText(
+    await phraseAsDuffy({
+      goal: "You scraped the IG profile but didn't find a website link. Ask the user (optional) if they have one — fashion the ask casually. Tell them to paste the URL or reply 'skip' to continue without it.",
+      mustConvey:
+        "You couldn't find a website link on their IG profile. Ask if they have one (optional). They can paste the URL or reply 'skip' to continue.",
+      brandId,
+      context: { igHandle: handle },
+      fallback: `Quick one: do you have a website I should peek at? Paste the URL or reply 'skip' to keep going.`,
+    }),
+  );
+  return 'awaiting_website';
+}
+
+const SKIP_WEBSITE_RE = /^(skip|no|nope|none|n\/a|na)\b/i;
+
+/**
+ * Parse the user's reply to the "do you have a website?" prompt. Returns
+ * `'skip'`, the normalized URL, or `null` if the reply doesn't look like
+ * either (caller should re-ask).
+ */
+function parseWebsiteReply(reply: string): 'skip' | string | null {
+  const trimmed = reply.trim();
+  if (!trimmed) return null;
+  if (SKIP_WEBSITE_RE.test(trimmed)) return 'skip';
+  return normalizeWebsiteUrl(trimmed);
 }
 
 async function executeBrandKit(ctx: OnboardingStepContext): Promise<OnboardingStepResult> {
@@ -176,8 +291,11 @@ async function executeBrandKit(ctx: OnboardingStepContext): Promise<OnboardingSt
     // is non-null here (the previous branch suspended).
     if (!brand.brandKitJson) {
       const handle = brand.igHandle as string;
-      const mode = await presentBrandKitOrAskRetry(brandId, handle, channel);
-      ctx.suspend({ question: 'brand_kit_review', mode });
+      const outcome = await probeAndAnalyzeOrAskWebsite(brandId, handle, channel);
+      if (outcome === 'awaiting_website') {
+        ctx.suspend({ question: 'website' });
+      }
+      ctx.suspend({ question: 'brand_kit_review', mode: outcome });
     }
     await presentBrandKitToUser(brand, channel);
     ctx.suspend({ question: 'brand_kit_review', mode: 'reviewing' });
@@ -190,8 +308,11 @@ async function executeBrandKit(ctx: OnboardingStepContext): Promise<OnboardingSt
     const extracted = await extractHandleWithLLM(reply);
     if (extracted) {
       await updateBrand(brandId, { igHandle: extracted });
-      const mode = await presentBrandKitOrAskRetry(brandId, extracted, channel);
-      ctx.suspend({ question: 'brand_kit_review', mode });
+      const outcome = await probeAndAnalyzeOrAskWebsite(brandId, extracted, channel);
+      if (outcome === 'awaiting_website') {
+        ctx.suspend({ question: 'website' });
+      }
+      ctx.suspend({ question: 'brand_kit_review', mode: outcome });
     }
     const isInvalidFormat = looksLikeHandle(reply);
     const { goal, mustConvey, fallback, maxChars } = isInvalidFormat
@@ -224,13 +345,48 @@ async function executeBrandKit(ctx: OnboardingStepContext): Promise<OnboardingSt
     ctx.suspend({ question: 'ig_handle' });
   }
 
-  // Sub-state 2: have handle but no brand kit — previous analysis failed,
+  // Sub-state 2a: have handle, no kit, and we previously asked for a website.
+  // Reply is the user's URL or 'skip'.
+  if (!brand.brandKitJson && brand.awaitingWebsiteReply && brand.igHandle) {
+    const handle = brand.igHandle;
+    const parsed = parseWebsiteReply(reply);
+    if (parsed === null) {
+      await channel.sendText(
+        await phraseAsDuffy({
+          goal: "The user replied to your website prompt with something that's neither a URL nor a clear skip. Ask again, briefly: paste the URL or reply 'skip'.",
+          mustConvey:
+            "What they sent isn't a URL and isn't a skip. Re-ask: paste the URL or reply 'skip'.",
+          brandId,
+          context: { igHandle: handle },
+          fallback:
+            "Hmm, that didn't look like a URL. Paste the website (e.g. nike.com) or reply 'skip' to continue without it.",
+        }),
+      );
+      ctx.suspend({ question: 'website' });
+    }
+    if (parsed === 'skip') {
+      await updateBrand(brandId, { awaitingWebsiteReply: false, websiteUrl: null });
+      const mode = await presentBrandKitOrAskRetry(brandId, handle, channel);
+      ctx.suspend({ question: 'brand_kit_review', mode });
+    }
+    // parsed is a normalized URL string.
+    await updateBrand(brandId, { awaitingWebsiteReply: false, websiteUrl: parsed });
+    const mode = await presentBrandKitOrAskRetry(brandId, handle, channel, {
+      website: parsed,
+    });
+    ctx.suspend({ question: 'brand_kit_review', mode });
+  }
+
+  // Sub-state 2b: have handle but no brand kit — previous analysis failed,
   // user replied with retry / new handle / clarification.
   if (!brand.brandKitJson) {
     const lower = reply.toLowerCase();
     if (/^(retry|try again|again|same|same handle)\b/.test(lower) && brand.igHandle) {
-      const mode = await presentBrandKitOrAskRetry(brandId, brand.igHandle, channel);
-      ctx.suspend({ question: 'brand_kit_review', mode });
+      const outcome = await probeAndAnalyzeOrAskWebsite(brandId, brand.igHandle, channel);
+      if (outcome === 'awaiting_website') {
+        ctx.suspend({ question: 'website' });
+      }
+      ctx.suspend({ question: 'brand_kit_review', mode: outcome });
     }
     const newHandle = await extractHandleWithLLM(reply);
     if (!newHandle) {
@@ -246,9 +402,16 @@ async function executeBrandKit(ctx: OnboardingStepContext): Promise<OnboardingSt
       ctx.suspend({ question: 'brand_kit_review', mode: 'retry_handle' });
     }
     const validatedHandle = newHandle as string;
-    await updateBrand(brandId, { igHandle: validatedHandle });
-    const mode = await presentBrandKitOrAskRetry(brandId, validatedHandle, channel);
-    ctx.suspend({ question: 'brand_kit_review', mode });
+    await updateBrand(brandId, {
+      igHandle: validatedHandle,
+      websiteUrl: null,
+      awaitingWebsiteReply: false,
+    });
+    const outcome = await probeAndAnalyzeOrAskWebsite(brandId, validatedHandle, channel);
+    if (outcome === 'awaiting_website') {
+      ctx.suspend({ question: 'website' });
+    }
+    ctx.suspend({ question: 'brand_kit_review', mode: outcome });
   }
 
   // Sub-state 3: brand kit exists — user is reviewing it.
@@ -271,9 +434,14 @@ async function executeBrandKit(ctx: OnboardingStepContext): Promise<OnboardingSt
         designSystemJson: null,
         voiceJson: null,
         igAnalysisJson: null,
+        websiteUrl: null,
+        awaitingWebsiteReply: false,
       });
-      const mode = await presentBrandKitOrAskRetry(brandId, newHandle, channel);
-      ctx.suspend({ question: 'brand_kit_review', mode });
+      const outcome = await probeAndAnalyzeOrAskWebsite(brandId, newHandle, channel);
+      if (outcome === 'awaiting_website') {
+        ctx.suspend({ question: 'website' });
+      }
+      ctx.suspend({ question: 'brand_kit_review', mode: outcome });
     }
   }
 

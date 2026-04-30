@@ -73,6 +73,17 @@ const voiceInputSchema = z.object({
   hashtags: z.array(z.string()),
 });
 
+const websiteInputSchema = z.object({
+  ok: z.literal(true),
+  sourceUrl: z.string(),
+  resolvedUrl: z.string(),
+  fontFamilies: z.array(z.string()),
+  headingFont: z.string().optional(),
+  bodyFont: z.string().optional(),
+  googleFonts: z.array(z.string()),
+  pageTitle: z.string().optional(),
+});
+
 export const saveBrandKitTool = createTool({
   id: 'saveBrandKit',
   description:
@@ -86,6 +97,11 @@ export const saveBrandKitTool = createTool({
     profilePic: profilePicInputSchema,
     visuals: visualsInputSchema,
     voice: voiceInputSchema,
+    website: websiteInputSchema
+      .optional()
+      .describe(
+        'Optional website analysis output (only when analyzeBrandWebsite returned ok: true).',
+      ),
   }),
   outputSchema: z.object({
     ok: z.literal(true),
@@ -99,6 +115,7 @@ export const saveBrandKitTool = createTool({
       profilePic: inputData.profilePic,
       visuals: inputData.visuals,
       voice: inputData.voice,
+      ...(inputData.website ? { website: inputData.website } : {}),
     });
 
     await updateBrand(inputData.brandId, {
