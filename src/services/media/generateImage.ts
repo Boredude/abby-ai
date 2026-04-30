@@ -1,8 +1,8 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import OpenAI, { toFile } from 'openai';
 import { loadEnv } from '../../config/env.js';
 import { logger } from '../../config/logger.js';
-import { uploadToR2 } from '../storage/r2.js';
+import { pickOwnerSegment, sanitizeOwnerSlug, uploadToR2 } from '../storage/r2.js';
 
 let openai: OpenAI | null = null;
 
@@ -27,8 +27,24 @@ export type GenerateImageOptions = {
   size?: '1024x1024' | '1024x1536' | '1536x1024';
   /** "low" | "medium" | "high" — gpt-image-* quality knob */
   quality?: 'low' | 'medium' | 'high';
-  /** Logical id used in the R2 object key prefix (e.g. brandId or draftId). */
+  /**
+   * Human-readable owner slug used as the folder segment in the R2 key
+   * (e.g. the brand's IG handle). Preferred over `ownerId` for legibility —
+   * the dashboard then shows folders like `images/cocktailshq/` instead of
+   * `images/<uuid>/`. Sanitized internally.
+   */
+  ownerSlug?: string;
+  /**
+   * Opaque owner id (typically `brand.id`). Used as a fallback folder
+   * segment when no slug is available — i.e. early onboarding, before we've
+   * extracted the IG handle.
+   */
   ownerId?: string;
+  /**
+   * Short hint baked into the filename to describe what this image is —
+   * e.g. `brand-board`, `draft`. Sanitized; defaults to `image`.
+   */
+  kind?: string;
   /**
    * Reference images to anchor the output. When provided, the call routes to
    * `images.edit` (multi-image input) instead of `images.generate`. Up to 16
@@ -100,8 +116,12 @@ export async function generateAndStoreImage(opts: GenerateImageOptions): Promise
   }
   const buffer = Buffer.from(b64, 'base64');
 
-  const ownerSeg = opts.ownerId ? `${opts.ownerId}/` : '';
-  const key = `images/${ownerSeg}${Date.now()}-${randomUUID()}.png`;
+  const ownerSeg = pickOwnerSegment({ slug: opts.ownerSlug, fallbackId: opts.ownerId });
+  const ownerPath = ownerSeg ? `${ownerSeg}/` : '';
+  const kind = sanitizeOwnerSlug(opts.kind) ?? 'image';
+  const stamp = formatTimestampForKey(new Date());
+  const rand = randomBytes(3).toString('hex');
+  const key = `images/${ownerPath}${kind}-${stamp}-${rand}.png`;
 
   const { url } = await uploadToR2({
     key,
@@ -117,4 +137,17 @@ function extOf(mediaType: string): string {
   if (mediaType.includes('webp')) return 'webp';
   if (mediaType.includes('gif')) return 'gif';
   return 'jpg';
+}
+
+/**
+ * Compact `YYYYMMDD-HHmmss` UTC stamp for R2 keys. Sortable, readable, and
+ * cheap to scan in the dashboard ("which board did we generate after the
+ * voice tweak yesterday?"). UTC keeps it deterministic across hosts.
+ */
+function formatTimestampForKey(d: Date): string {
+  const p = (n: number, w = 2) => String(n).padStart(w, '0');
+  return (
+    `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}` +
+    `-${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}`
+  );
 }

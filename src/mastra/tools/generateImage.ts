@@ -1,5 +1,7 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
+import { logger } from '../../config/logger.js';
+import { findBrandById } from '../../db/repositories/brands.js';
 import { generateAndStoreImage } from '../../services/media/generateImage.js';
 
 export const generateImageTool = createTool({
@@ -21,11 +23,26 @@ export const generateImageTool = createTool({
     prompt: z.string(),
   }),
   execute: async (inputData) => {
+    // Resolve the brand's IG handle so the R2 key uses the legible
+    // `images/<handle>/...` folder instead of `images/<uuid>/...`. Best-effort:
+    // if the lookup fails (race during early onboarding, transient db hiccup)
+    // we still ship the image, just under the brand-id fallback folder.
+    let ownerSlug: string | undefined;
+    if (inputData.brandId) {
+      try {
+        const brand = await findBrandById(inputData.brandId);
+        if (brand?.igHandle) ownerSlug = brand.igHandle;
+      } catch (err) {
+        logger.warn({ err, brandId: inputData.brandId }, 'generateImage: brand lookup failed; using id fallback');
+      }
+    }
+
     return generateAndStoreImage({
       prompt: inputData.prompt,
       ...(inputData.size ? { size: inputData.size } : {}),
       ...(inputData.quality ? { quality: inputData.quality } : {}),
       ...(inputData.brandId ? { ownerId: inputData.brandId } : {}),
+      ...(ownerSlug ? { ownerSlug } : {}),
     });
   },
 });

@@ -1,13 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock the network + R2 boundaries before we import the SUT so the
-// module-level imports pick up the stubs.
+// module-level imports pick up the stubs. We keep the real `pickOwnerSegment`
+// / `sanitizeOwnerSlug` helpers — they're pure and the tests assert against
+// the slugified key paths they produce.
 vi.mock('../../src/services/onboarding/visionImage.js', () => ({
   downloadImage: vi.fn(),
 }));
-vi.mock('../../src/services/storage/r2.js', () => ({
-  uploadToR2: vi.fn(),
-}));
+vi.mock('../../src/services/storage/r2.js', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    uploadToR2: vi.fn(),
+  };
+});
 
 import { downloadImage } from '../../src/services/onboarding/visionImage.js';
 import { uploadToR2 } from '../../src/services/storage/r2.js';
@@ -37,8 +43,14 @@ describe('mirrorIgImage', () => {
       url: `https://r2.example/${key}`,
     }));
 
-    const a = await mirrorIgImage('brand-1', { label: 'profile-pic', url: 'https://ig.example/x' });
-    const b = await mirrorIgImage('brand-1', { label: 'profile-pic', url: 'https://ig.example/x' });
+    const a = await mirrorIgImage(
+      { brandId: 'brand-1' },
+      { label: 'profile-pic', url: 'https://ig.example/x' },
+    );
+    const b = await mirrorIgImage(
+      { brandId: 'brand-1' },
+      { label: 'profile-pic', url: 'https://ig.example/x' },
+    );
 
     expect(a).not.toBeNull();
     expect(b).not.toBeNull();
@@ -50,9 +62,47 @@ describe('mirrorIgImage', () => {
     expect(a!.mediaType).toBe('image/jpeg');
   });
 
+  it('uses the IG handle as the owner segment when provided, sanitized', async () => {
+    mockedDownload.mockResolvedValue({
+      bytes: new Uint8Array([1, 2, 3]),
+      mediaType: 'image/jpeg',
+    });
+    mockedUpload.mockImplementation(async ({ key }: { key: string }) => ({
+      key,
+      url: `https://r2.example/${key}`,
+    }));
+
+    // Mixed-case + leading "@" should normalize down to a clean segment.
+    const r = await mirrorIgImage(
+      { brandId: 'brand-1', igHandle: '@CocktailsHQ' },
+      { label: 'profile-pic', url: 'https://ig.example/x' },
+    );
+    expect(r!.key).toMatch(/^ig-mirror\/cocktailshq\/profile-pic-[0-9a-f]{16}\.jpg$/);
+  });
+
+  it('falls back to brandId when no IG handle is available', async () => {
+    mockedDownload.mockResolvedValue({
+      bytes: new Uint8Array([1, 2, 3]),
+      mediaType: 'image/jpeg',
+    });
+    mockedUpload.mockImplementation(async ({ key }: { key: string }) => ({
+      key,
+      url: `https://r2.example/${key}`,
+    }));
+
+    const r = await mirrorIgImage(
+      { brandId: 'brand-1', igHandle: null },
+      { label: 'profile-pic', url: 'https://ig.example/x' },
+    );
+    expect(r!.key).toMatch(/^ig-mirror\/brand-1\/profile-pic-/);
+  });
+
   it('returns null when the source download fails', async () => {
     mockedDownload.mockRejectedValue(new Error('IG 403'));
-    const r = await mirrorIgImage('brand-1', { label: 'profile-pic', url: 'https://ig.example/x' });
+    const r = await mirrorIgImage(
+      { brandId: 'brand-1' },
+      { label: 'profile-pic', url: 'https://ig.example/x' },
+    );
     expect(r).toBeNull();
     expect(mockedUpload).not.toHaveBeenCalled();
   });
@@ -63,7 +113,10 @@ describe('mirrorIgImage', () => {
       mediaType: 'image/jpeg',
     });
     mockedUpload.mockRejectedValue(new Error('R2 down'));
-    const r = await mirrorIgImage('brand-1', { label: 'profile-pic', url: 'https://ig.example/x' });
+    const r = await mirrorIgImage(
+      { brandId: 'brand-1' },
+      { label: 'profile-pic', url: 'https://ig.example/x' },
+    );
     expect(r).toBeNull();
   });
 
@@ -79,7 +132,10 @@ describe('mirrorIgImage', () => {
         key,
         url: `https://r2.example/${key}`,
       }));
-      const r = await mirrorIgImage('brand-1', { label: 'profile-pic', url: `https://ig.example/${ext}` });
+      const r = await mirrorIgImage(
+        { brandId: 'brand-1' },
+        { label: 'profile-pic', url: `https://ig.example/${ext}` },
+      );
       expect(r?.key.endsWith(`.${ext}`)).toBe(true);
     }
   });
@@ -96,7 +152,7 @@ describe('mirrorIgImages', () => {
       url: `https://r2.example/${key}`,
     }));
 
-    const map = await mirrorIgImages('brand-1', [
+    const map = await mirrorIgImages({ brandId: 'brand-1' }, [
       { label: 'profile-pic', url: 'https://ig.example/p' },
       { label: 'post-1', url: 'https://ig.example/fail' },
       { label: 'post-2', url: 'https://ig.example/q' },
@@ -109,7 +165,7 @@ describe('mirrorIgImages', () => {
   });
 
   it('returns an empty map for an empty input list without calling the network', async () => {
-    const map = await mirrorIgImages('brand-1', []);
+    const map = await mirrorIgImages({ brandId: 'brand-1' }, []);
     expect(map.size).toBe(0);
     expect(mockedDownload).not.toHaveBeenCalled();
     expect(mockedUpload).not.toHaveBeenCalled();

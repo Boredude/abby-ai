@@ -404,6 +404,8 @@ export async function generateBrandBoard(
     size: '1024x1024',
     quality: 'medium',
     ownerId: brand.id,
+    ...(brand.igHandle ? { ownerSlug: brand.igHandle } : {}),
+    kind: 'brand-board',
     ...(mode === 'edit-with-refs' ? { referenceImages: refs } : {}),
   });
 
