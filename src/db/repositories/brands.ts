@@ -25,6 +25,8 @@ export async function updateBrand(
   id: string,
   patch: Partial<{
     igHandle: string | null;
+    websiteUrl: string | null;
+    awaitingWebsiteReply: boolean;
     voiceJson: BrandVoice | null;
     cadenceJson: BrandCadence | null;
     brandKitJson: BrandKit | null;

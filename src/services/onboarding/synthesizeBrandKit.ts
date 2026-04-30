@@ -9,6 +9,7 @@ import type { InstagramScrapeResult } from '../apify/instagramScraper.js';
 import type { ProfilePicAnalysis } from './analyzeProfilePic.js';
 import type { VisualAnalysis } from './analyzeVisuals.js';
 import type { VoiceAnalysis } from './analyzeVoice.js';
+import type { WebsiteAnalysis } from './analyzeWebsite.js';
 
 /**
  * Stitch the raw scrape + analyzer outputs into the persisted brand shapes.
@@ -20,6 +21,7 @@ export type SynthesizeInput = {
   profilePic: ProfilePicAnalysis;
   visuals: VisualAnalysis;
   voice: VoiceAnalysis;
+  website?: WebsiteAnalysis;
 };
 
 export type SynthesizedBrand = {
@@ -30,7 +32,7 @@ export type SynthesizedBrand = {
 };
 
 export function synthesizeBrandKit(input: SynthesizeInput): SynthesizedBrand {
-  const { scrape, profilePic, visuals, voice } = input;
+  const { scrape, profilePic, visuals, voice, website } = input;
 
   const profilePicUrl = scrape.profile.profilePicUrlHD ?? scrape.profile.profilePicUrl;
 
@@ -42,13 +44,15 @@ export function synthesizeBrandKit(input: SynthesizeInput): SynthesizedBrand {
     ...(profilePicUrl ? { profilePicUrl } : {}),
   };
 
+  const typography = buildTypography(visuals, website);
+
   const brandKit: BrandKit = {
     palette: profilePic.palette.map((p) => ({
       hex: p.hex,
       role: p.role,
       ...(p.name ? { name: p.name } : {}),
     })),
-    typography: { mood: visuals.typographyMood },
+    typography,
     logo,
   };
 
@@ -97,9 +101,11 @@ export function synthesizeBrandKit(input: SynthesizeInput): SynthesizedBrand {
       ...(scrape.profile.isVerified !== undefined
         ? { isVerified: scrape.profile.isVerified }
         : {}),
-      ...(scrape.profile.externalUrl !== undefined
-        ? { externalUrl: scrape.profile.externalUrl }
-        : {}),
+      ...(website?.resolvedUrl
+        ? { externalUrl: website.resolvedUrl }
+        : scrape.profile.externalUrl !== undefined
+          ? { externalUrl: scrape.profile.externalUrl }
+          : {}),
     },
     posts: scrape.posts.map((p) => ({
       url: p.url,
@@ -115,9 +121,61 @@ export function synthesizeBrandKit(input: SynthesizeInput): SynthesizedBrand {
     rawVisuals: visuals,
     rawVoice: voice,
     rawProfilePic: profilePic,
+    ...(website ? { rawWebsite: website } : {}),
   };
 
   return { brandKit, designSystem, voice: persistedVoice, igAnalysis };
+}
+
+/**
+ * Combine the post-grid mood string (always present) with whatever font
+ * names we managed to scrape from the brand's website (when available).
+ * The `mood` string stays human-readable for image-generation prompts; the
+ * structured fields give the rest of the system real font names to work with.
+ */
+function buildTypography(
+  visuals: VisualAnalysis,
+  website: WebsiteAnalysis | undefined,
+): BrandKit['typography'] {
+  const baseMood = visuals.typographyMood;
+  if (!website) {
+    return { mood: baseMood, source: 'instagram' };
+  }
+
+  const fontFamilies = website.fontFamilies.length > 0 ? website.fontFamilies : undefined;
+  const headingFont = website.headingFont ?? fontFamilies?.[0];
+  const bodyFont = website.bodyFont ?? (fontFamilies && fontFamilies.length > 1 ? fontFamilies[1] : undefined);
+
+  const fontHint = formatFontHint(headingFont, bodyFont, fontFamilies);
+  const mood = fontHint ? `${baseMood} — primary type: ${fontHint}` : baseMood;
+  const hasAnyFontInfo = Boolean(headingFont || bodyFont || fontFamilies?.length);
+  const source: NonNullable<BrandKit['typography']['source']> = hasAnyFontInfo
+    ? 'mixed'
+    : 'instagram';
+
+  return {
+    mood,
+    source,
+    ...(headingFont ? { headingFont } : {}),
+    ...(bodyFont ? { bodyFont } : {}),
+    ...(fontFamilies ? { fontFamilies } : {}),
+  };
+}
+
+function formatFontHint(
+  heading: string | undefined,
+  body: string | undefined,
+  families: string[] | undefined,
+): string | null {
+  if (heading && body && heading.toLowerCase() !== body.toLowerCase()) {
+    return `${heading} (heading) / ${body} (body)`;
+  }
+  if (heading) return `${heading} (heading)`;
+  if (body) return `${body} (body)`;
+  if (families && families.length > 0) {
+    return families.slice(0, 2).join(' / ');
+  }
+  return null;
 }
 
 function mapPostType(t: string): IgAnalysisSnapshot['posts'][number]['type'] {
