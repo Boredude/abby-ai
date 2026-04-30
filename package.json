@@ -37,6 +37,7 @@
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.15",
+    "libphonenumber-js": "^1.12.42",
     "openai": "^4.77.0",
     "pg": "^8.13.1",
     "pg-boss": "^12.17.0",
