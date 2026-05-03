@@ -29,7 +29,28 @@ Use `feat/<feature_name>` for features and `fix/<fix_name>` for fixes (matches t
 
 3. Do ALL editing, testing, and committing inside that worktree directory. Never `git checkout <other-branch>` in a worktree another agent might be using.
 
-4. When the task is done and merged, clean up:
+4. Make the worktree self-contained for package installs. If `node_modules` is a symlink to the main checkout's `node_modules` (common pattern when bootstrapping a worktree fast), `pnpm add` and friends will fail with `ERR_PNPM_UNEXPECTED_VIRTUAL_STORE` because pnpm rejects a shared virtual store. BEFORE the first install, break the symlink and give the worktree its own install:
+
+```bash
+# inside the worktree
+[ -L node_modules ] && rm node_modules
+pnpm install
+```
+
+Never "unblock" a failing `pnpm add` / `pnpm install` / `drizzle-kit` / etc. by running it in the main checkout. That silently mutates files on `main` and leaks them into whatever commit you make from main next.
+
+5. Before every mutating command (install, migration, codegen, file edit via terminal tools, commit), verify you're inside the worktree:
+
+```bash
+git rev-parse --show-toplevel   # MUST print the worktree path, not the main checkout
+git branch --show-current       # MUST print the feature/fix branch, not main
+```
+
+6. Commit ONLY via terminals/tools rooted in the worktree directory. Do not commit via an IDE UI that is opened on the main checkout folder — its Source Control panel is bound to that folder's git index and will commit any modified files there to whatever branch that folder is on (usually `main`). Either:
+   - commit from a terminal whose cwd is the worktree, OR
+   - open the worktree in its own IDE window (`File > Open Folder` → the worktree path) and commit from there.
+
+7. When the task is done and merged, clean up:
 
 ```bash
 # from the main repo root
@@ -44,6 +65,8 @@ git branch -d feat/<feature_name>   # only if fully merged
 - Place worktrees as siblings of the main repo (e.g. `../duffy-ai-<slug>`), never nested inside it.
 - If a worktree for the target branch already exists, `cd` into it instead of creating a duplicate.
 - If you cannot create a worktree (e.g. uncommitted changes block it), stop and report the blocker rather than working in the shared checkout.
+- If ANY command fails because of the environment in the worktree (pnpm store, drizzle-kit resolution, missing node_modules, etc.), fix it inside the worktree — never retry the command from the main checkout to "unblock" yourself. Installing or generating in the main checkout is the #1 way feature work leaks onto `main`.
+- Before finishing a feature, sanity-check that `main` didn't drift. From the main checkout: `git log origin/main..main --oneline` MUST be empty (no accidental commits on main) and `git status --short` MUST be clean. If it isn't, those changes belong on the feature branch, not `main` — cherry-pick them over and reset main.
 
 ## Quick Reference
 
