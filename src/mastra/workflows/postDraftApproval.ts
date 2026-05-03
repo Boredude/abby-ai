@@ -5,12 +5,17 @@ import { logger } from '../../config/logger.js';
 import { findBrandById } from '../../db/repositories/brands.js';
 import {
   appendEditNote,
-  createPostDraft,
   findDraftById,
   updateDraftStatus,
 } from '../../db/repositories/postDrafts.js';
 import { QUEUES, getBoss } from '../../jobs/queue.js';
-import { generateDraftForBrand } from '../../services/draftGenerator.js';
+import {
+  buildEditDirective,
+  classifyEditIntent,
+} from '../../services/creative/editIntent.js';
+import { getContentType } from '../../services/creative/registry.js';
+import { runCreativePipeline } from '../../services/creative/runCreativePipeline.js';
+import { stepIdSchema } from '../../services/creative/types.js';
 
 /**
  * Post-draft approval workflow.
@@ -29,6 +34,13 @@ import { generateDraftForBrand } from '../../services/draftGenerator.js';
 
 const decisionSchema = z.enum(['approve', 'edit', 'reject']);
 
+const DEFAULT_CONTENT_TYPE_ID = 'igSinglePost';
+
+const editDirectiveSchema = z.object({
+  note: z.string(),
+  invalidate: z.array(stepIdSchema).default([]),
+});
+
 const generate = createStep({
   id: 'generate',
   inputSchema: z.object({
@@ -36,6 +48,8 @@ const generate = createStep({
     scheduledAt: z.string().describe('ISO date for delivery via WA when approved'),
     briefingHint: z.string().optional(),
     existingDraftId: z.string().optional(),
+    contentTypeId: z.string().default(DEFAULT_CONTENT_TYPE_ID),
+    editDirective: editDirectiveSchema.optional(),
   }),
   outputSchema: z.object({
     brandId: z.string(),
@@ -43,31 +57,24 @@ const generate = createStep({
     scheduledAt: z.string(),
   }),
   execute: async ({ inputData }) => {
-    const { brandId, scheduledAt, briefingHint, existingDraftId } = inputData;
-    const result = await generateDraftForBrand({
+    const {
       brandId,
+      scheduledAt,
+      briefingHint,
+      existingDraftId,
+      contentTypeId,
+      editDirective,
+    } = inputData;
+    const result = await runCreativePipeline({
+      brandId,
+      contentTypeId,
+      scheduledAt: new Date(scheduledAt),
       ...(briefingHint ? { briefingHint } : {}),
+      ...(existingDraftId ? { existingDraftId } : {}),
+      ...(editDirective ? { editDirective } : {}),
     });
 
-    let draftId = existingDraftId;
-    if (existingDraftId) {
-      const updated = await updateDraftStatus(existingDraftId, 'draft', {
-        caption: result.caption,
-        mediaUrls: [result.imageUrl],
-      });
-      draftId = updated.id;
-    } else {
-      const draft = await createPostDraft({
-        brandId,
-        caption: result.caption,
-        mediaUrls: [result.imageUrl],
-        scheduledAt: new Date(scheduledAt),
-        status: 'draft',
-      });
-      draftId = draft.id;
-    }
-
-    return { brandId, draftId: draftId!, scheduledAt };
+    return { brandId, draftId: result.draftId, scheduledAt };
   },
 });
 
@@ -162,6 +169,7 @@ const handleDecision = createStep({
     finalDecision: decisionSchema,
     briefingHint: z.string().optional(),
     existingDraftId: z.string().optional(),
+    editDirective: editDirectiveSchema.optional(),
   }),
   execute: async ({ inputData }) => {
     const { brandId, draftId, scheduledAt, decision, editNote } = inputData;
@@ -193,12 +201,27 @@ const handleDecision = createStep({
       return { brandId, draftId, scheduledAt, finalDecision: decision };
     }
 
-    // edit: record the note, ask for direction if missing, and signal a regeneration.
+    // edit: record the note, classify which pipeline steps to invalidate,
+    // and signal a targeted regeneration (the `generate` step above will
+    // consume `editDirective` and rerun only the dirty steps).
     const note = editNote?.trim() || '';
     if (note) {
       await appendEditNote(draftId, { at: new Date().toISOString(), note });
     }
     const briefingHint = note || 'The user wants this post revised. Try a fresh angle.';
+
+    // For MVP we use the single content-type pipeline. When we add carousel /
+    // reel, the draft row will persist its contentTypeId and we'll look it
+    // up here instead of hard-coding.
+    const contentType = getContentType(DEFAULT_CONTENT_TYPE_ID);
+    const availableSteps = contentType.pipeline.map((s) => s.id);
+    const intent = await classifyEditIntent({ note: briefingHint, availableSteps });
+    const editDirective = buildEditDirective(briefingHint, intent);
+    logger.info(
+      { draftId, invalidate: editDirective.invalidate, reasoning: intent.reasoning },
+      'Edit intent classified',
+    );
+
     await channel.sendText("On it — taking another swing now ✏️");
     return {
       brandId,
@@ -207,6 +230,7 @@ const handleDecision = createStep({
       finalDecision: decision,
       briefingHint,
       existingDraftId: draftId,
+      editDirective,
     };
   },
 });
@@ -222,6 +246,8 @@ const reviseLoop = createWorkflow({
     scheduledAt: z.string(),
     briefingHint: z.string().optional(),
     existingDraftId: z.string().optional(),
+    contentTypeId: z.string().default(DEFAULT_CONTENT_TYPE_ID),
+    editDirective: editDirectiveSchema.optional(),
   }),
   outputSchema: z.object({
     brandId: z.string(),
@@ -230,6 +256,7 @@ const reviseLoop = createWorkflow({
     finalDecision: decisionSchema,
     briefingHint: z.string().optional(),
     existingDraftId: z.string().optional(),
+    editDirective: editDirectiveSchema.optional(),
   }),
 })
   .then(generate)

@@ -1,0 +1,1 @@
+ALTER TABLE "post_drafts" ADD COLUMN "generation" jsonb DEFAULT 'null'::jsonb;

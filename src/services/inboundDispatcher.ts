@@ -131,7 +131,10 @@ export async function dispatchInboundMessage(parsed: ChannelMessage): Promise<vo
     try {
       const resumeData = buildResumeDataFor(activeRun.workflowId, parsed);
       await resumeWorkflow({
-        workflowId: activeRun.workflowId as 'brandOnboarding' | 'postDraftApproval',
+        workflowId: activeRun.workflowId as
+          | 'brandOnboarding'
+          | 'postDraftApproval'
+          | 'startPost',
         runId: activeRun.runId,
         brandId: brand.id,
         ...(activeRun.draftId ? { draftId: activeRun.draftId } : {}),

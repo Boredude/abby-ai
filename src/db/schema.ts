@@ -137,6 +137,11 @@ export const postDrafts = pgTable(
     scheduledAt: timestamp('scheduled_at', { withTimezone: true }),
     status: draftStatusEnum('status').default('draft').notNull(),
     editNotes: jsonb('edit_notes').$type<EditNote[] | null>().default(null),
+    // Structured per-step output from the creative pipeline. Lets the approval
+    // loop regenerate a single step (e.g. swap the image but keep the copy)
+    // by invalidating + re-running only that step's artifact. The shape is
+    // validated via `postDraftGenerationSchema` from `services/creative/types`.
+    generation: jsonb('generation').$type<PostDraftGeneration | null>().default(null),
     error: text('error'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -212,6 +217,18 @@ export type BrandCadence = {
 export type EditNote = {
   at: string;
   note: string;
+};
+
+/**
+ * Structured output of the creative pipeline. The canonical runtime shape
+ * lives in `src/services/creative/types.ts` as `PostDraftGeneration`; we
+ * re-declare a loose type alias here only so Drizzle can attach it to the
+ * `generation` jsonb column without a circular import back into services/.
+ */
+export type PostDraftGeneration = {
+  contentTypeId: string;
+  steps: Partial<Record<string, unknown>>;
+  editHistory: Array<{ at: string; note: string; invalidated: string[] }>;
 };
 
 export type BrandPaletteEntry = {

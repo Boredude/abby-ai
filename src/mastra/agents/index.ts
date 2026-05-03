@@ -1,5 +1,9 @@
 import { getCopywriterAgent } from './copywriter.js';
+import { getCreativeDirectorAgent } from './creativeDirector.js';
 import { getDuffyAgent } from './duffy.js';
+import { getHashtaggerAgent } from './hashtagger.js';
+import { getIdeatorAgent } from './ideator.js';
+import { getImageGenAgent } from './imageGen.js';
 import { getOnboardingAgent } from './onboarding.js';
 import { getSchedulerAgent } from './scheduler.js';
 import { getStylistAgent } from './stylist.js';
@@ -16,8 +20,12 @@ export function buildAgents() {
   return {
     duffy: getDuffyAgent(),
     onboardingAgent: getOnboardingAgent(),
+    creativeDirectorAgent: getCreativeDirectorAgent(),
     stylistAgent: getStylistAgent(),
     copywriterAgent: getCopywriterAgent(),
+    ideatorAgent: getIdeatorAgent(),
+    hashtaggerAgent: getHashtaggerAgent(),
+    imageGenAgent: getImageGenAgent(),
     schedulerAgent: getSchedulerAgent(),
   };
 }

@@ -29,7 +29,7 @@ const mocks = vi.hoisted(() => ({
   upsertBrandByChannel: vi.fn(async ({ kind, externalId }: { kind: string; externalId: string }) => ({
     brand: {
       id: 'brand-new',
-      igHandle: null,
+      igHandle: null as string | null,
       voiceJson: null,
       cadenceJson: null,
       brandKitJson: null,
@@ -37,7 +37,7 @@ const mocks = vi.hoisted(() => ({
       igAnalysisJson: null,
       brandBoardImageUrl: null,
       timezone: 'UTC',
-      status: 'pending' as const,
+      status: 'pending' as 'pending' | 'onboarding' | 'active' | 'paused',
       createdAt: new Date(),
       updatedAt: new Date(),
     },
@@ -52,7 +52,7 @@ const mocks = vi.hoisted(() => ({
       createdAt: new Date(),
       updatedAt: new Date(),
     },
-    created: true,
+    created: true as boolean,
   })),
   startWorkflow: vi.fn(async (..._args: unknown[]) => ({ runId: 'r', status: 'suspended' as const })),
   resumeWorkflow: vi.fn(async (..._args: unknown[]) => ({ status: 'success' as const })),
@@ -72,8 +72,13 @@ vi.mock('../../src/db/repositories/brandChannels.js', () => ({
   upsertBrandByChannel: mocks.upsertBrandByChannel,
 }));
 
+const workflowRunsMocks = vi.hoisted(() => ({
+  findActiveRunForBrand: vi.fn(async (..._args: unknown[]) => null as unknown),
+}));
+const findActiveRunForBrand = workflowRunsMocks.findActiveRunForBrand;
+
 vi.mock('../../src/db/repositories/workflowRuns.js', () => ({
-  findActiveRunForBrand: vi.fn(async () => null),
+  findActiveRunForBrand: workflowRunsMocks.findActiveRunForBrand,
   findRunByDraft: vi.fn(async () => null),
 }));
 
@@ -216,5 +221,152 @@ describe('dispatchInboundMessage → slash commands', () => {
 
     expect(mocks.resetBrandByChannel).not.toHaveBeenCalled();
     expect(mocks.upsertBrandByChannel).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('dispatchInboundMessage → /post', () => {
+  function setBrandStatus(status: 'pending' | 'onboarding' | 'active' | 'paused') {
+    mocks.upsertBrandByChannel.mockImplementationOnce(
+      async ({ kind, externalId }: { kind: string; externalId: string }) => ({
+        brand: {
+          id: 'brand-1',
+          igHandle: 'acme',
+          voiceJson: null,
+          cadenceJson: null,
+          brandKitJson: null,
+          designSystemJson: null,
+          igAnalysisJson: null,
+          brandBoardImageUrl: null,
+          timezone: 'UTC',
+          status,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        channel: {
+          id: 'bc-1',
+          brandId: 'brand-1',
+          kind,
+          externalId,
+          isPrimary: true,
+          status: 'connected' as const,
+          metadata: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        created: false,
+      }),
+    );
+  }
+
+  it('kicks off the startPost workflow for an active brand with no args', async () => {
+    channelMocks.bound.sendText.mockClear();
+    mocks.startWorkflow.mockClear();
+    findActiveRunForBrand.mockResolvedValueOnce(null);
+    setBrandStatus('active');
+
+    await dispatchInboundMessage({
+      channelKind: 'whatsapp',
+      externalUserId: PHONE,
+      externalMessageId: 'm-post-1',
+      kind: 'text',
+      text: '/post',
+    });
+
+    expect(mocks.startWorkflow).toHaveBeenCalledTimes(1);
+    const args = mocks.startWorkflow.mock.calls[0]?.[0] as {
+      workflowId: string;
+      inputData: Record<string, unknown>;
+    };
+    expect(args.workflowId).toBe('startPost');
+    expect(args.inputData.briefingHint).toBeUndefined();
+    // The channel ask is sent by the workflow's collect-brief step, not the
+    // slash handler — so no text was sent by the command itself.
+    expect(channelMocks.bound.sendText).not.toHaveBeenCalled();
+  });
+
+  it('passes the /post args as the briefingHint (preserving case)', async () => {
+    mocks.startWorkflow.mockClear();
+    findActiveRunForBrand.mockResolvedValueOnce(null);
+    setBrandStatus('active');
+
+    await dispatchInboundMessage({
+      channelKind: 'whatsapp',
+      externalUserId: PHONE,
+      externalMessageId: 'm-post-2',
+      kind: 'text',
+      text: '/post Something About the Summer Menu',
+    });
+
+    expect(mocks.startWorkflow).toHaveBeenCalledTimes(1);
+    const args = mocks.startWorkflow.mock.calls[0]?.[0] as {
+      inputData: { briefingHint?: string };
+    };
+    expect(args.inputData.briefingHint).toBe('Something About the Summer Menu');
+  });
+
+  it('refuses to start /post while another workflow is suspended', async () => {
+    channelMocks.bound.sendText.mockClear();
+    mocks.startWorkflow.mockClear();
+    findActiveRunForBrand.mockResolvedValueOnce({
+      id: 'run-row',
+      brandId: 'brand-1',
+      draftId: null,
+      runId: 'r-1',
+      workflowId: 'postDraftApproval',
+      suspendedStep: 'request-approval',
+      suspendPayload: null,
+      status: 'suspended',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    setBrandStatus('active');
+
+    await dispatchInboundMessage({
+      channelKind: 'whatsapp',
+      externalUserId: PHONE,
+      externalMessageId: 'm-post-3',
+      kind: 'text',
+      text: '/post',
+    });
+
+    expect(mocks.startWorkflow).not.toHaveBeenCalled();
+    const reply = channelMocks.bound.sendText.mock.calls[0]?.[0] as string;
+    expect(reply.toLowerCase()).toContain('already got a draft');
+  });
+
+  it('asks the user to finish onboarding first when status is pending', async () => {
+    channelMocks.bound.sendText.mockClear();
+    mocks.startWorkflow.mockClear();
+    setBrandStatus('pending');
+
+    await dispatchInboundMessage({
+      channelKind: 'whatsapp',
+      externalUserId: PHONE,
+      externalMessageId: 'm-post-4',
+      kind: 'text',
+      text: '/post',
+    });
+
+    expect(mocks.startWorkflow).not.toHaveBeenCalled();
+    const reply = channelMocks.bound.sendText.mock.calls[0]?.[0] as string;
+    expect(reply.toLowerCase()).toContain('finish setting up');
+  });
+
+  it('tells the user to unpause a paused brand before using /post', async () => {
+    channelMocks.bound.sendText.mockClear();
+    mocks.startWorkflow.mockClear();
+    setBrandStatus('paused');
+
+    await dispatchInboundMessage({
+      channelKind: 'whatsapp',
+      externalUserId: PHONE,
+      externalMessageId: 'm-post-5',
+      kind: 'text',
+      text: '/post',
+    });
+
+    expect(mocks.startWorkflow).not.toHaveBeenCalled();
+    const reply = channelMocks.bound.sendText.mock.calls[0]?.[0] as string;
+    expect(reply.toLowerCase()).toContain('paused');
   });
 });

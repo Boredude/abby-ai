@@ -1,5 +1,9 @@
 import type { Agent } from '@mastra/core/agent';
 import { getCopywriterAgent } from './copywriter.js';
+import { getCreativeDirectorAgent } from './creativeDirector.js';
+import { getHashtaggerAgent } from './hashtagger.js';
+import { getIdeatorAgent } from './ideator.js';
+import { getImageGenAgent } from './imageGen.js';
 import { getOnboardingAgent } from './onboarding.js';
 import { getSchedulerAgent } from './scheduler.js';
 import { getStylistAgent } from './stylist.js';
@@ -14,8 +18,12 @@ import { getStylistAgent } from './stylist.js';
 
 export const SUB_AGENT_NAMES = [
   'onboardingAgent',
+  'creativeDirectorAgent',
   'stylistAgent',
   'copywriterAgent',
+  'ideatorAgent',
+  'hashtaggerAgent',
+  'imageGenAgent',
   'schedulerAgent',
 ] as const;
 
@@ -23,8 +31,12 @@ export type SubAgentName = (typeof SUB_AGENT_NAMES)[number];
 
 const FACTORIES: Record<SubAgentName, () => Agent> = {
   onboardingAgent: getOnboardingAgent,
+  creativeDirectorAgent: getCreativeDirectorAgent,
   stylistAgent: getStylistAgent,
   copywriterAgent: getCopywriterAgent,
+  ideatorAgent: getIdeatorAgent,
+  hashtaggerAgent: getHashtaggerAgent,
+  imageGenAgent: getImageGenAgent,
   schedulerAgent: getSchedulerAgent,
 };
 
@@ -36,12 +48,20 @@ const FACTORIES: Record<SubAgentName, () => Agent> = {
 export const SUB_AGENT_DESCRIPTIONS: Record<SubAgentName, string> = {
   onboardingAgent:
     "Brand discovery: scrapes a brand's Instagram, analyzes visuals + voice, builds the brand kit/design system/voice guide.",
+  creativeDirectorAgent:
+    "Runs the full creative pipeline for ONE post (or reel, carousel, etc.). Delegates to ideator/copywriter/hashtagger/stylist/imageGen in order and returns when every step's artifact is persisted on the draft.",
   stylistAgent:
-    'Visual direction: turns brand kit + post brief into image directions and image-generator prompts.',
+    "Art director. Consumes 'ideation' + brand kit and commits an 'artDirection' artifact (subject/composition/lighting/palette/mood + imagePrompt).",
   copywriterAgent:
-    'Caption writing: writes Instagram captions in the brand voice, with optional variants and hashtags.',
+    "Caption writer. Consumes the 'ideation' artifact and commits a 'copy' artifact (hook + body + cta + fullCaption) in the brand voice.",
+  ideatorAgent:
+    "Picks ONE fresh, on-brand topic+angle for a post. Commits an 'ideation' artifact.",
+  hashtaggerAgent:
+    "Hashtag picker. Consumes 'copy' and commits a 'hashtags' artifact respecting the brand's hashtag policy.",
+  imageGenAgent:
+    "Image renderer. Consumes 'artDirection', calls the image model, and commits an 'image' artifact (public URL).",
   schedulerAgent:
-    'Cadence + timing: proposes a posting schedule from a brand cadence + draft list, in the audience timezone.',
+    "Cadence + timing specialist. Proposes posting schedules from a brand cadence + draft list.",
 };
 
 export function isSubAgentName(name: string): name is SubAgentName {

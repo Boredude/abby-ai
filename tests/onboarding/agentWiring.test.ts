@@ -50,15 +50,25 @@ describe('agent wiring', () => {
     expect(Object.keys(subs)).toHaveLength(0);
   });
 
-  it('builds the three Phase-2 stub sub-agents (stylist, copywriter, scheduler) with no tools', async () => {
+  it('builds the creative specialists with the right tool surfaces', async () => {
     const stylist = getStylistAgent();
     expect(stylist.id).toBe('stylistAgent');
-    expect(Object.keys(await stylist.listTools())).toHaveLength(0);
+    expect(Object.keys(await stylist.listTools()).sort()).toEqual([
+      'getBrandBoard',
+      'getBrandContext',
+      'loadCreativeRun',
+      'saveStepArtifact',
+    ]);
 
     const copywriter = getCopywriterAgent();
     expect(copywriter.id).toBe('copywriterAgent');
-    expect(Object.keys(await copywriter.listTools())).toHaveLength(0);
+    expect(Object.keys(await copywriter.listTools()).sort()).toEqual([
+      'getBrandContext',
+      'loadCreativeRun',
+      'saveStepArtifact',
+    ]);
 
+    // Scheduler stays as a Phase-2 stub for now (no tools wired).
     const scheduler = getSchedulerAgent();
     expect(scheduler.id).toBe('schedulerAgent');
     expect(Object.keys(await scheduler.listTools())).toHaveLength(0);

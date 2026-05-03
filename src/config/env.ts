@@ -22,6 +22,24 @@ const schema = z.object({
   DUFFY_ORCHESTRATOR_MODEL: z.string().default('anthropic/claude-haiku-4-5'),
   ONBOARDING_AGENT_MODEL: z.string().default('anthropic/claude-sonnet-4-5'),
 
+  // Google Generative AI (Gemini) — required when any CREATIVE_*_MODEL uses a
+  // `google/...` slug (e.g. Gemini 3 for ideation/hashtags). Kept optional so
+  // a dev can swap those slugs for anthropic/openai without setting it.
+  GOOGLE_GENERATIVE_AI_API_KEY: z.string().optional(),
+
+  // Per-role model slugs for the creative pipeline. Each specialist sub-agent
+  // picks its own model so we can optimize cost/quality per task. Mastra
+  // resolves the `provider/model` prefix and routes to the bundled AI-SDK
+  // provider, so swapping providers needs no code change.
+  CREATIVE_DIRECTOR_MODEL: z.string().default('openai/gpt-4o'),
+  CREATIVE_IDEATOR_MODEL: z.string().default('google/gemini-3-pro-preview'),
+  CREATIVE_COPYWRITER_MODEL: z.string().default('anthropic/claude-sonnet-4-6'),
+  CREATIVE_HASHTAG_MODEL: z.string().default('google/gemini-3-pro-preview'),
+  CREATIVE_STYLIST_MODEL: z.string().default('openai/gpt-4o'),
+  // Image rendering uses OPENAI_IMAGE_MODEL above.
+  // The edit-intent classifier (classifyEditIntent) reuses CREATIVE_DIRECTOR_MODEL.
+  // Future: CREATIVE_VIDEO_MODEL for reel rendering.
+
   APIFY_TOKEN: z.string().min(1, 'APIFY_TOKEN is required'),
 
   R2_ACCOUNT_ID: z.string().min(1, 'R2_ACCOUNT_ID is required'),

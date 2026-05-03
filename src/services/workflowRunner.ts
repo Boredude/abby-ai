@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { logger } from '../config/logger.js';
 import { markRunStatus, markSuspended, recordRun } from '../db/repositories/workflowRuns.js';
 import { getMastra } from '../mastra/index.js';
-import type { DuffyWorkflowId } from '../mastra/workflows/index.js';
+import type { DuffyWorkflowId } from '../mastra/workflows/ids.js';
 
 type WorkflowResultLike = {
   status: 'success' | 'suspended' | 'failed' | string;

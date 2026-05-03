@@ -2,10 +2,14 @@ import { getChannel } from '../channels/registry.js';
 import type { ChannelMessage } from '../channels/types.js';
 import { logger } from '../config/logger.js';
 import { getPool } from '../db/client.js';
+import { upsertBrandByChannel } from '../db/repositories/brandChannels.js';
+import { findActiveRunForBrand } from '../db/repositories/workflowRuns.js';
 import { resetBrandByChannel } from './admin/resetBrandState.js';
+import { startWorkflow } from './workflowRunner.js';
 
 const HELP_LINES = [
   'Commands you can send me:',
+  '/post [topic] — draft a new Instagram post (I\'ll ask for a topic if you skip one)',
   '/reset — wipe everything (memory, brand profile, brand kit, scheduled posts) and start over',
   '/help — show this list',
 ];
@@ -27,6 +31,19 @@ export function parseSlashCommand(text: string): SlashCommand | null {
   if (!trimmed.startsWith('/')) return null;
   const [head, ...args] = trimmed.split(/\s+/);
   return { command: head!.slice(1).toLowerCase(), args };
+}
+
+/**
+ * Free-text briefing extracted from a slash command body. For `/post`, we
+ * want to preserve the user's original phrasing (casing, punctuation) —
+ * not the lower-cased command itself. So we re-slice from the original
+ * text instead of re-joining `cmd.args`.
+ */
+function extractArgsText(rawText: string): string {
+  const trimmed = rawText.trim();
+  const firstSpace = trimmed.search(/\s/);
+  if (firstSpace === -1) return '';
+  return trimmed.slice(firstSpace + 1).trim();
 }
 
 /**
@@ -69,6 +86,60 @@ export async function handleSlashCommand(
         log.error({ err }, 'Slash command: /reset failed');
         await channel.sendText(
           "Couldn't reset just now — something went sideways on my end. Try again in a moment.",
+        );
+      }
+      return;
+    }
+
+    case 'post': {
+      log.info('Slash command: /post');
+      try {
+        const { brand } = await upsertBrandByChannel({
+          kind: parsed.channelKind,
+          externalId: parsed.externalUserId,
+        });
+
+        // Gate: `/post` only makes sense for an onboarded brand. Before the
+        // brand kit + voice exist, the creative pipeline has nothing to
+        // ground on.
+        if (brand.status === 'pending' || brand.status === 'onboarding') {
+          await channel.sendText(
+            "Let's finish setting up your brand first — tell me your Instagram handle and I'll build your kit. Then /post will work.",
+          );
+          return;
+        }
+        if (brand.status === 'paused') {
+          await channel.sendText(
+            "Your account is paused. Send me anything to resume, then try /post again.",
+          );
+          return;
+        }
+
+        // One workflow at a time per brand. If the user is already mid-review
+        // for another draft, don't start a second run — the inbound resume
+        // routing assumes exactly one suspended workflow.
+        const existing = await findActiveRunForBrand(brand.id);
+        if (existing) {
+          await channel.sendText(
+            "You've already got a draft waiting on your reply — let's finish that one first (approve / edit / reject), or send /reset to start over.",
+          );
+          return;
+        }
+
+        const briefingHint = extractArgsText(parsed.text);
+        await startWorkflow({
+          workflowId: 'startPost',
+          brandId: brand.id,
+          inputData: {
+            brandId: brand.id,
+            ...(briefingHint ? { briefingHint } : {}),
+          },
+        });
+        log.info({ hasBrief: !!briefingHint }, 'Slash command: /post started');
+      } catch (err) {
+        log.error({ err }, 'Slash command: /post failed');
+        await channel.sendText(
+          "Couldn't spin up a new post just now — something went sideways on my end. Try again in a moment.",
         );
       }
       return;

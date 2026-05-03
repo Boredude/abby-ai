@@ -1,23 +1,37 @@
 import { Agent } from '@mastra/core/agent';
 import { loadEnv } from '../../config/env.js';
 import { getSharedMemory } from '../memory.js';
+import { getBrandContextTool } from '../tools/getBrandContext.js';
+import { loadCreativeRunTool } from '../tools/loadCreativeRun.js';
+import { saveStepArtifactTool } from '../tools/saveStepArtifact.js';
 
 const COPYWRITER_INSTRUCTIONS = `
-You are the Copywriter — Duffy's caption and on-brand text specialist.
-Given a brand voice guide and a post brief, you write:
-  - the caption (in the brand's voice, with hooks/CTAs as appropriate)
-  - 2–4 alt variants when asked
-  - matching hashtag set when the voice guide opts into hashtags
+You are the Copywriter — Duffy's caption specialist for a single post.
 
-Stub for Phase 2: tools (post analysis, hashtag research, A/B variant
-generation) will be wired in later phases. For now, work from text only.
+Goal: write the caption in the brand's voice, grounded in the already-picked
+ideation artifact.
+
+Workflow:
+  1. Call \`loadCreativeRun\` to read the current run state. The 'ideation'
+     step will be present in \`completedSteps\`. If it is missing, stop and
+     reply "Ideation artifact not found — aborting."
+  2. Call \`getBrandContext\` for the brand's voice guide (summary, tone,
+     audience, do/don't, emoji usage).
+  3. Write the caption:
+       - hook: the first line — stops the scroll
+       - body: 2–4 short paragraphs consistent with the voice
+       - cta: a single closing line
+       - fullCaption: hook + body + cta, joined with line breaks
+  4. Call \`saveStepArtifact\` with step="copy" and artifact:
+     { hook, body, cta, fullCaption }
+  5. Reply with ONE short acknowledgement (e.g. "Caption saved.").
 
 Rules:
-  - Match the voice guide's tone, do/don't lists, and audience.
-  - No corporate filler, no emojis unless the voice guide calls for them.
-  - Keep captions Instagram-friendly: hook in the first line.
-  - If you don't have enough voice context, ask one tight clarifying question
-    instead of inventing a tone.
+  - DO NOT include hashtags in \`fullCaption\`. The hashtagger handles them.
+  - No emojis unless the voice guide opts in (\`emojiUsage !== 'none'\`).
+  - No placeholder text, no "[TBD]", no markdown fences.
+  - Keep it Instagram-native: first line must hook the reader.
+  - Save the artifact EXACTLY once.
 `.trim();
 
 let copywriterAgent: Agent | null = null;
@@ -29,10 +43,15 @@ export function getCopywriterAgent(): Agent {
     id: 'copywriterAgent',
     name: 'CopywriterAgent',
     description:
-      'Caption + on-brand text specialist. Writes Instagram captions in the brand voice. Stub in Phase 2 — text-only, no tools yet.',
+      "Caption writer. Consumes the 'ideation' artifact and commits a 'copy' artifact (hook + body + cta + fullCaption) in the brand voice.",
     instructions: COPYWRITER_INSTRUCTIONS,
-    model: env.DUFFY_ORCHESTRATOR_MODEL,
+    model: env.CREATIVE_COPYWRITER_MODEL,
     memory: getSharedMemory(),
+    tools: {
+      loadCreativeRun: loadCreativeRunTool,
+      getBrandContext: getBrandContextTool,
+      saveStepArtifact: saveStepArtifactTool,
+    },
   });
   return copywriterAgent;
 }

@@ -32,7 +32,9 @@ vi.mock('../../src/mastra/agents/registry.js', async () => {
         case 'onboardingAgent':
           return { generate: mocks.onboardingGenerate };
         default:
-          throw new Error(`unknown ${name}`);
+          // Creative-pipeline sub-agents (ideator/hashtagger/imageGen/creativeDirector)
+          // are covered by creative-specific tests; delegateTo just routes.
+          return { generate: vi.fn(async () => ({ text: 'ok' })) };
       }
     }),
   };
