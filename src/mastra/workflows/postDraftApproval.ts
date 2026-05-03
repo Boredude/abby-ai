@@ -65,16 +65,40 @@ const generate = createStep({
       contentTypeId,
       editDirective,
     } = inputData;
-    const result = await runCreativePipeline({
-      brandId,
-      contentTypeId,
-      scheduledAt: new Date(scheduledAt),
-      ...(briefingHint ? { briefingHint } : {}),
-      ...(existingDraftId ? { existingDraftId } : {}),
-      ...(editDirective ? { editDirective } : {}),
-    });
+    try {
+      const result = await runCreativePipeline({
+        brandId,
+        contentTypeId,
+        scheduledAt: new Date(scheduledAt),
+        ...(briefingHint ? { briefingHint } : {}),
+        ...(existingDraftId ? { existingDraftId } : {}),
+        ...(editDirective ? { editDirective } : {}),
+      });
 
-    return { brandId, draftId: result.draftId, scheduledAt };
+      return { brandId, draftId: result.draftId, scheduledAt };
+    } catch (err) {
+      // Never let a pipeline failure turn into dead silence on the user's
+      // phone. Mastra still marks the run failed (we rethrow below); the
+      // DM is just so the brand knows something broke and can retry. The
+      // user-facing copy is intentionally vague — the real error is in logs.
+      logger.error(
+        { err, brandId, contentTypeId, isEditAttempt: !!editDirective },
+        'postDraftApproval.generate: creative pipeline failed',
+      );
+      try {
+        const channel = await requireBrandChannel(brandId);
+        const message = editDirective
+          ? "I couldn't regenerate that draft — try sending your edit again, or /reset if it stays stuck."
+          : "I hit a snag drafting your post — give it a minute and try /post again. If it keeps failing, /reset will clear any stuck state.";
+        await channel.sendText(message);
+      } catch (notifyErr) {
+        logger.error(
+          { err: notifyErr, brandId },
+          'postDraftApproval.generate: failed to notify brand about pipeline failure',
+        );
+      }
+      throw err;
+    }
   },
 });
 

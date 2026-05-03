@@ -32,9 +32,13 @@ const schema = z.object({
   // resolves the `provider/model` prefix and routes to the bundled AI-SDK
   // provider, so swapping providers needs no code change.
   CREATIVE_DIRECTOR_MODEL: z.string().default('openai/gpt-4o'),
-  CREATIVE_IDEATOR_MODEL: z.string().default('google/gemini-3-pro-preview'),
+  // `gemini-2.5-pro` instead of `gemini-3-pro-preview` because Gemini 3 Pro
+  // has no free tier (limit=0), which was hard-blocking any `/post` run on a
+  // non-billable Google key. 2.5-pro is free-tier-eligible and good enough
+  // for ideation / hashtag generation. Swap via env to upgrade later.
+  CREATIVE_IDEATOR_MODEL: z.string().default('google/gemini-2.5-pro'),
   CREATIVE_COPYWRITER_MODEL: z.string().default('anthropic/claude-sonnet-4-6'),
-  CREATIVE_HASHTAG_MODEL: z.string().default('google/gemini-3-pro-preview'),
+  CREATIVE_HASHTAG_MODEL: z.string().default('google/gemini-2.5-pro'),
   CREATIVE_STYLIST_MODEL: z.string().default('openai/gpt-4o'),
   // Image rendering uses OPENAI_IMAGE_MODEL above.
   // The edit-intent classifier (classifyEditIntent) reuses CREATIVE_DIRECTOR_MODEL.
