@@ -76,7 +76,9 @@ export const igSinglePostContentType: ContentType = {
     },
     {
       id: IMAGE_STEP,
-      agentName: 'imageGenAgent',
+      // Deterministic step: runCreativeStep forwards the stylist's
+      // `imagePrompt` straight to the image model. No LLM in the loop.
+      agentName: null,
       dependsOn: [ART_DIRECTION_STEP],
       description: 'Render the image from the art direction prompt and store it in R2.',
     },

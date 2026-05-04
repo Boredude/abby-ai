@@ -13,8 +13,8 @@ import {
 /**
  * Repository for the `post_drafts.generation` blob. Centralizes:
  *   - initialisation of the blob for a freshly-created draft,
- *   - atomic per-step artifact writes (director + sub-agents call this via
- *     the `saveStepArtifact` tool),
+ *   - atomic per-step artifact writes (the creative pipeline calls
+ *     `setStepArtifact` after each step's specialist returns),
  *   - invalidation of a set of step ids + an `editHistory` breadcrumb so the
  *     approval loop can explain to itself why those steps are missing.
  *

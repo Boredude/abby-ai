@@ -3,15 +3,18 @@ import { z } from 'zod';
 /**
  * Per-step artifact schemas for the creative pipeline.
  *
- * Each specialist sub-agent commits its output by calling the
- * `saveStepArtifact` tool with a payload that matches one of these schemas.
- * Keeping them narrow, strict, and discriminated by `step` is what lets the
- * director orchestrate deterministically — the agents produce data, not prose.
+ * Each pipeline step produces a strictly-typed JSON artifact. For
+ * model-driven steps, the matching specialist agent is invoked with
+ * `output: <schema>` so the AI SDK coerces the response into one of these
+ * shapes; `runCreativeStep` then persists it via `setStepArtifact`. For
+ * deterministic steps (e.g. image render), `runCreativeStep` builds the
+ * artifact in code and persists the same way.
  *
  * Adding a new step:
- *   1. Define its artifact schema here (include it in `stepArtifactSchema`).
+ *   1. Define its artifact schema here (include it in `stepArtifactInputSchema`).
  *   2. Reference the step in a `ContentType.pipeline` entry.
- *   3. Wire a specialist sub-agent that emits it.
+ *   3. Either wire a specialist sub-agent that emits it, or add a
+ *      deterministic branch in `runCreativeStep`.
  */
 
 export const IDEATION_STEP = 'ideation' as const;
@@ -81,7 +84,7 @@ export const imageArtifactSchema = z.object({
 });
 export type ImageArtifact = z.infer<typeof imageArtifactSchema>;
 
-// ---------- discriminated union for the saveStepArtifact tool ----------
+// ---------- discriminated union persisted by setStepArtifact ----------
 
 export const stepArtifactInputSchema = z.discriminatedUnion('step', [
   z.object({ step: z.literal(IDEATION_STEP), artifact: ideationArtifactSchema }),

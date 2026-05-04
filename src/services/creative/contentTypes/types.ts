@@ -11,13 +11,17 @@ import type { StepArtifacts, StepId } from '../types.js';
  * downstream of it is automatically invalidated too (the hashtag set that
  * was tailored to the old caption, for example).
  *
- * The `agentName` MUST match a key in the Mastra agents registry; we
- * intentionally don't import the registry type here to keep the content
- * type layer decoupled from Mastra wiring (makes testing trivial).
+ * `agentName` is the key of the Mastra specialist agent that produces this
+ * step's artifact, when the step is model-driven. It is `null` for steps
+ * that `runCreativeStep` handles deterministically (e.g. the image step,
+ * which is a pure forward of the stylist's `imagePrompt` to the renderer).
+ *
+ * We intentionally don't import the agent-registry type here so the
+ * content-type layer stays decoupled from Mastra wiring (trivial to test).
  */
 export type PipelineStep = {
   id: StepId;
-  agentName: string;
+  agentName: string | null;
   dependsOn: readonly StepId[];
   description: string;
 };
